@@ -61,11 +61,13 @@ export function StatusPanel({ geo, orientation, sun, fov, skyAnalysis }: Props) 
       <div className="status-panel__row">
         <span className="status-panel__key">Sun vis</span>
         <span className="status-panel__val">
-          {skyAnalysis
-            ? skyAnalysis.sunDetected
-              ? 'Visible in frame'
-              : 'Not detected'
-            : '—'}
+          {skyAnalysis == null
+            ? '—'
+            : skyAnalysis.sunInSky === true
+            ? 'In sky'
+            : skyAnalysis.sunInSky === false
+            ? 'Behind terrain'
+            : 'Not in frame'}
         </span>
       </div>
       {!orientation.absolute && orientation.supported && (

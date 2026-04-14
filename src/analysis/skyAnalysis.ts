@@ -29,6 +29,8 @@ export interface SkyAnalysis {
   sunCenter: { nx: number; ny: number } | null;
   /** Radius of the detected sun blob in normalised coords. */
   sunRadius: number;
+  /** Whether the computed sun position is in the sky region. Set externally by the overlay. */
+  sunInSky: boolean | null;
 }
 
 const AW = 80;
@@ -168,6 +170,31 @@ function findSkyBoundary(
   return boundary;
 }
 
+/**
+ * Check whether a screen-space pixel coordinate falls within the sky region.
+ * @param px  Screen X coordinate.
+ * @param py  Screen Y coordinate.
+ * @param screenW  Screen/canvas width.
+ * @param screenH  Screen/canvas height.
+ * @param sky  The current SkyAnalysis result.
+ * @returns true if the point is in the sky, false if on the ground or out of frame.
+ */
+export function isPointInSky(
+  px: number,
+  py: number,
+  screenW: number,
+  screenH: number,
+  sky: SkyAnalysis,
+): boolean {
+  // Map screen coords to analysis grid coords
+  const ax = (px / screenW) * sky.width;
+  const ay = (py / screenH) * sky.height;
+
+  const col = Math.round(ax);
+  if (col < 0 || col >= sky.width) return false;
+  return ay < sky.skyline[col];
+}
+
 export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   if (!video.videoWidth || !video.videoHeight) return null;
 
@@ -277,5 +304,6 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
     sunDetected,
     sunCenter,
     sunRadius,
+    sunInSky: null, // set by overlay after computing sun pixel position
   };
 }

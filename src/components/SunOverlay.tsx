@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { OrientationState } from '../hooks/useDeviceOrientation';
 import type { SunPosition } from '../hooks/useSunPosition';
-import { analyseSky } from '../analysis/skyAnalysis';
+import { analyseSky, isPointInSky } from '../analysis/skyAnalysis';
 import type { SkyAnalysis } from '../analysis/skyAnalysis';
 
 interface Props {
@@ -66,9 +66,7 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const video = videoRef.current;
       frameCount.current++;
       if (video && frameCount.current % ANALYSIS_INTERVAL === 0) {
-        const result = analyseSky(video);
-        lastAnalysis.current = result;
-        onSkyAnalysis?.(result);
+        lastAnalysis.current = analyseSky(video);
       }
 
       const sky = lastAnalysis.current;
@@ -90,7 +88,14 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
         orientation.heading != null &&
         orientation.tilt != null;
 
-      if (!hasData) return;
+      if (!hasData) {
+        // Still report sky analysis even without orientation data
+        if (sky && frameCount.current % ANALYSIS_INTERVAL === 0) {
+          sky.sunInSky = null;
+          onSkyAnalysis?.(sky);
+        }
+        return;
+      }
 
       const heading = orientation.heading!;
       const tilt = orientation.tilt!;
@@ -116,6 +121,13 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 
       const px = W / 2 + (dAzRot / (visibleFovH / 2)) * (W / 2);
       const py = H / 2 - (dElRot / (visibleFovV / 2)) * (H / 2);
+
+      // --- Determine if the computed sun is in the sky region ---
+      if (sky && frameCount.current % ANALYSIS_INTERVAL === 0) {
+        const inFrame = px >= 0 && px <= W && py >= 0 && py <= H;
+        sky.sunInSky = inFrame ? isPointInSky(px, py, W, H, sky) : null;
+        onSkyAnalysis?.(sky);
+      }
 
       const inFrame =
         px >= -40 && px <= W + 40 && py >= -40 && py <= H + 40;
