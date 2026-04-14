@@ -68,8 +68,28 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const sunAz = sun!.azimuth;
       const sunEl = sun!.altitude;
 
-      // Horizontal FoV given; derive vertical FoV from aspect ratio
-      const fovV = fovH * (H / W);
+      // Compute the *visible* FoV after object-fit: cover crops the video.
+      //
+      // The camera's native FoV is fovH (horizontal) across videoWidth pixels.
+      // object-fit: cover scales by max(screenW/videoW, screenH/videoH), then
+      // only the portion that fits the screen is visible.
+      const video = videoRef.current;
+      const videoW = video?.videoWidth || 1920;
+      const videoH = video?.videoHeight || 1080;
+
+      // Camera's native vertical FoV (derived from horizontal FoV and sensor aspect)
+      const nativeFovV = fovH * (videoH / videoW);
+
+      // object-fit: cover scale factor
+      const scale = Math.max(W / videoW, H / videoH);
+
+      // How many video pixels are visible in each axis
+      const visibleVideoW = W / scale;
+      const visibleVideoH = H / scale;
+
+      // Visible FoV = native FoV * fraction of video pixels visible
+      const visibleFovH = fovH * (visibleVideoW / videoW);
+      const visibleFovV = nativeFovV * (visibleVideoH / videoH);
 
       // Angular offset from where the camera is pointing
       const dAz = angleDiff(sunAz, heading);   // positive = sun is to the right
@@ -81,8 +101,8 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const dElRot = -dAz * Math.sin(rollRad) + dEl * Math.cos(rollRad);
 
       // Convert angular offsets to pixel positions
-      const px = W / 2 + (dAzRot / (fovH / 2)) * (W / 2);
-      const py = H / 2 - (dElRot / (fovV / 2)) * (H / 2);
+      const px = W / 2 + (dAzRot / (visibleFovH / 2)) * (W / 2);
+      const py = H / 2 - (dElRot / (visibleFovV / 2)) * (H / 2);
 
       const inFrame =
         px >= -40 && px <= W + 40 && py >= -40 && py <= H + 40;
@@ -90,13 +110,13 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       if (inFrame) {
         drawSunDot(ctx, px, py);
       } else {
-        drawEdgeArrow(ctx, W, H, dAzRot, dElRot, fovH, fovV);
+        drawEdgeArrow(ctx, W, H, dAzRot, dElRot, visibleFovH, visibleFovV);
       }
     }
 
     rafRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [orientation, sun, fovH, overlayRef]);
+  }, [orientation, sun, fovH, overlayRef, videoRef]);
 
   return (
     <div className="sun-overlay">
