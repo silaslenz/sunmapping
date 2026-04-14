@@ -1,0 +1,334 @@
+/* =============================================
+   Global reset & base
+   ============================================= */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #fff;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* =============================================
+   Permission Gate
+   ============================================= */
+.permission-gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  background: linear-gradient(160deg, #0a0a1a 0%, #1a1020 100%);
+  padding: 24px;
+}
+
+.permission-gate__inner {
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+}
+
+.permission-gate__title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0 0 12px;
+  color: #ffe600;
+  letter-spacing: -0.5px;
+}
+
+.permission-gate__desc {
+  font-size: 0.95rem;
+  color: #aaa;
+  margin: 0 0 24px;
+  line-height: 1.5;
+}
+
+.permission-gate__list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-gate__list li {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  color: #ddd;
+}
+
+.permission-gate__list li::before {
+  content: '▸ ';
+  color: #ffe600;
+}
+
+.permission-gate__errors {
+  margin-top: 16px;
+}
+
+.permission-gate__error {
+  background: rgba(255, 80, 80, 0.15);
+  border: 1px solid rgba(255, 80, 80, 0.4);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: #ffaaaa;
+  margin: 6px 0;
+  text-align: left;
+}
+
+/* =============================================
+   Buttons
+   ============================================= */
+.btn-start {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffe600;
+  color: #111;
+  font-size: 1rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 12px;
+  padding: 14px 48px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: background 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-start:active {
+  background: #ffd000;
+  transform: scale(0.97);
+}
+
+.btn-icon {
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  font-size: 1.1rem;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+
+.btn-icon:active {
+  background: rgba(255,255,255,0.2);
+}
+
+/* Shutter / capture button */
+.btn-capture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.15);
+  border: 3px solid #fff;
+  border-radius: 50%;
+  width: 64px;
+  height: 64px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s, transform 0.1s;
+}
+
+.btn-capture:active {
+  background: rgba(255,255,255,0.35);
+  transform: scale(0.93);
+}
+
+.btn-capture__icon {
+  display: block;
+  width: 46px;
+  height: 46px;
+  background: #fff;
+  border-radius: 50%;
+}
+
+/* =============================================
+   Main app layout
+   ============================================= */
+.app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* =============================================
+   Sun overlay (camera + canvas)
+   ============================================= */
+.sun-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.sun-overlay__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sun-overlay__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* =============================================
+   Top bar
+   ============================================= */
+.top-bar {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 14px;
+  /* Safe area for notches */
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+/* =============================================
+   Settings drawer
+   ============================================= */
+.settings-drawer {
+  position: relative;
+  z-index: 10;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 14px 16px 10px;
+}
+
+/* =============================================
+   Bottom bar
+   ============================================= */
+.bottom-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 12px 16px max(16px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0) 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+}
+
+/* Capture button row — centered */
+.bottom-bar > .btn-capture {
+  align-self: center;
+}
+
+/* =============================================
+   Status panel
+   ============================================= */
+.status-panel {
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.status-panel__row {
+  display: flex;
+  gap: 8px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.status-panel__key {
+  color: #999;
+  min-width: 68px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.5px;
+  padding-top: 1px;
+}
+
+.status-panel__val {
+  color: #eee;
+  word-break: break-all;
+}
+
+.status-panel__warn {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: rgba(255,160,0,0.15);
+  border: 1px solid rgba(255,160,0,0.35);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  color: #ffcc66;
+  line-height: 1.4;
+}
+
+/* =============================================
+   FoV slider
+   ============================================= */
+.fov-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fov-slider__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #ccc;
+}
+
+.fov-slider__value {
+  color: #ffe600;
+  font-weight: 600;
+  min-width: 34px;
+}
+
+.fov-slider__input {
+  width: 100%;
+  accent-color: #ffe600;
+  cursor: pointer;
+}
+
+.fov-slider__hint {
+  font-size: 0.72rem;
+  color: #777;
+}
