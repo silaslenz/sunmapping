@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import type { OrientationState } from '../hooks/useDeviceOrientation';
 import type { SunPosition } from '../hooks/useSunPosition';
+import { analyseSky } from '../analysis/skyAnalysis';
+import type { SkyAnalysis } from '../analysis/skyAnalysis';
 
 interface Props {
   stream: MediaStream | null;
@@ -9,18 +11,24 @@ interface Props {
   fovH: number; // horizontal field of view in degrees
   videoRef: React.RefObject<HTMLVideoElement | null>;
   overlayRef: React.RefObject<HTMLCanvasElement | null>;
+  onSkyAnalysis?: (analysis: SkyAnalysis | null) => void;
 }
 
 const TWO_PI = Math.PI * 2;
 
 /** Normalize an angle difference to [-180, 180]. */
 function angleDiff(a: number, b: number): number {
-  let d = ((a - b) + 540) % 360 - 180;
+  const d = ((a - b) + 540) % 360 - 180;
   return d;
 }
 
-export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRef }: Props) {
+/** How many frames to skip between sky analyses. */
+const ANALYSIS_INTERVAL = 6;
+
+export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRef, onSkyAnalysis }: Props) {
   const rafRef = useRef<number>(0);
+  const frameCount = useRef(0);
+  const lastAnalysis = useRef<SkyAnalysis | null>(null);
 
   // Attach stream to video element
   useEffect(() => {
@@ -28,7 +36,7 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
     if (!video) return;
     if (stream) {
       video.srcObject = stream;
-      video.play().catch(() => {/* autoplay may be blocked, user interaction unblocks it */});
+      video.play().catch(() => {/* autoplay may be blocked */});
     } else {
       video.srcObject = null;
     }
@@ -54,6 +62,28 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 
       ctx.clearRect(0, 0, W, H);
 
+      // --- Sky analysis (throttled) ---
+      const video = videoRef.current;
+      frameCount.current++;
+      if (video && frameCount.current % ANALYSIS_INTERVAL === 0) {
+        const result = analyseSky(video);
+        lastAnalysis.current = result;
+        onSkyAnalysis?.(result);
+      }
+
+      const sky = lastAnalysis.current;
+
+      // --- Draw skyline ---
+      if (sky) {
+        drawSkyline(ctx, sky, W, H);
+      }
+
+      // --- Draw detected sun blob ---
+      if (sky?.sunDetected && sky.sunCenter) {
+        drawDetectedSun(ctx, sky.sunCenter.nx * W, sky.sunCenter.ny * H);
+      }
+
+      // --- Computed sun position overlay ---
       const hasData =
         sun != null &&
         orientation.absolute &&
@@ -68,39 +98,22 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const sunAz = sun!.azimuth;
       const sunEl = sun!.altitude;
 
-      // Compute the *visible* FoV after object-fit: cover crops the video.
-      //
-      // The camera's native FoV is fovH (horizontal) across videoWidth pixels.
-      // object-fit: cover scales by max(screenW/videoW, screenH/videoH), then
-      // only the portion that fits the screen is visible.
-      const video = videoRef.current;
       const videoW = video?.videoWidth || 1920;
       const videoH = video?.videoHeight || 1080;
-
-      // Camera's native vertical FoV (derived from horizontal FoV and sensor aspect)
       const nativeFovV = fovH * (videoH / videoW);
-
-      // object-fit: cover scale factor
       const scale = Math.max(W / videoW, H / videoH);
-
-      // How many video pixels are visible in each axis
       const visibleVideoW = W / scale;
       const visibleVideoH = H / scale;
-
-      // Visible FoV = native FoV * fraction of video pixels visible
       const visibleFovH = fovH * (visibleVideoW / videoW);
       const visibleFovV = nativeFovV * (visibleVideoH / videoH);
 
-      // Angular offset from where the camera is pointing
-      const dAz = angleDiff(sunAz, heading);   // positive = sun is to the right
-      const dEl = sunEl - tilt;                 // positive = sun is above center
+      const dAz = angleDiff(sunAz, heading);
+      const dEl = sunEl - tilt;
 
-      // Account for roll: rotate the (dAz, dEl) vector by -roll
       const rollRad = (roll * Math.PI) / 180;
       const dAzRot = dAz * Math.cos(rollRad) + dEl * Math.sin(rollRad);
       const dElRot = -dAz * Math.sin(rollRad) + dEl * Math.cos(rollRad);
 
-      // Convert angular offsets to pixel positions
       const px = W / 2 + (dAzRot / (visibleFovH / 2)) * (W / 2);
       const py = H / 2 - (dElRot / (visibleFovV / 2)) * (H / 2);
 
@@ -116,7 +129,7 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 
     rafRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [orientation, sun, fovH, overlayRef, videoRef]);
+  }, [orientation, sun, fovH, overlayRef, videoRef, onSkyAnalysis]);
 
   return (
     <div className="sun-overlay">
@@ -135,6 +148,72 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
   );
 }
 
+// ===================================================================
+// Drawing helpers
+// ===================================================================
+
+/** Draw the skyline boundary as a smooth translucent line. */
+function drawSkyline(
+  ctx: CanvasRenderingContext2D,
+  sky: SkyAnalysis,
+  W: number,
+  H: number,
+) {
+  const { skyline, width, height } = sky;
+  if (skyline.length === 0) return;
+
+  const xScale = W / width;
+  const yScale = H / height;
+
+  ctx.beginPath();
+  ctx.moveTo(0, skyline[0] * yScale);
+
+  for (let x = 1; x < width; x++) {
+    ctx.lineTo(x * xScale, skyline[x] * yScale);
+  }
+
+  // Fill sky region (above the line) with a subtle tint
+  ctx.lineTo(W, 0);
+  ctx.lineTo(0, 0);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.08)';
+  ctx.fill();
+
+  // Stroke the skyline
+  ctx.beginPath();
+  ctx.moveTo(0, skyline[0] * yScale);
+  for (let x = 1; x < width; x++) {
+    ctx.lineTo(x * xScale, skyline[x] * yScale);
+  }
+  ctx.strokeStyle = 'rgba(100, 180, 255, 0.5)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+/** Draw a marker where the sun was detected in the image. */
+function drawDetectedSun(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  const r = 30;
+
+  // Dashed ring around detected position
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, TWO_PI);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Label
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillText('DETECTED', x + 1, y + r + 5);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+  ctx.fillText('DETECTED', x, y + r + 4);
+}
+
+/** Draw the computed sun position as a glowing dot. */
 function drawSunDot(ctx: CanvasRenderingContext2D, x: number, y: number) {
   const r = 22;
 
@@ -174,6 +253,7 @@ function drawSunDot(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.stroke();
 }
 
+/** Draw an edge arrow pointing toward the sun when it's offscreen. */
 function drawEdgeArrow(
   ctx: CanvasRenderingContext2D,
   W: number,
@@ -181,31 +261,26 @@ function drawEdgeArrow(
   dAz: number,
   dEl: number,
   fovH: number,
-  fovV: number
+  fovV: number,
 ) {
-  // Angle of the sun relative to screen center
-  const angleRad = Math.atan2(-dEl / fovV, dAz / fovH); // screen angle
+  const angleRad = Math.atan2(-dEl / fovV, dAz / fovH);
   const margin = 44;
   const cx = W / 2;
   const cy = H / 2;
 
-  // Find where the ray from center hits the screen edge
   const cos = Math.cos(angleRad);
   const sin = Math.sin(angleRad);
 
-  let tx: number, ty: number;
-  // Clip to rectangle
   const xEdge = cos > 0 ? W - margin : margin;
   const yEdge = sin < 0 ? margin : H - margin;
   const tx1 = cos !== 0 ? (xEdge - cx) / cos : Infinity;
   const ty1 = sin !== 0 ? (yEdge - cy) / sin : Infinity;
   const t = Math.min(Math.abs(tx1), Math.abs(ty1));
-  tx = cx + cos * t;
-  ty = cy + sin * t;
+  let tx = cx + cos * t;
+  let ty = cy + sin * t;
   tx = Math.max(margin, Math.min(W - margin, tx));
   ty = Math.max(margin, Math.min(H - margin, ty));
 
-  // Arrow
   const arrowLen = 28;
   const arrowWidth = 10;
 
@@ -213,7 +288,6 @@ function drawEdgeArrow(
   ctx.translate(tx, ty);
   ctx.rotate(angleRad);
 
-  // Arrow body
   ctx.beginPath();
   ctx.moveTo(arrowLen / 2, 0);
   ctx.lineTo(-arrowLen / 2, arrowWidth / 2);
@@ -227,7 +301,6 @@ function drawEdgeArrow(
 
   ctx.restore();
 
-  // Label "SUN" near the arrow
   const labelOffset = 18;
   const lx = Math.max(30, Math.min(W - 30, tx + cos * labelOffset));
   const ly = Math.max(20, Math.min(H - 20, ty + sin * labelOffset));

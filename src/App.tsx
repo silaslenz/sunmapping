@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useDeviceOrientation } from './hooks/useDeviceOrientation';
 import { useSunPosition } from './hooks/useSunPosition';
@@ -9,6 +9,7 @@ import { StatusPanel } from './components/StatusPanel';
 import { FovSlider } from './components/FovSlider';
 import { DebugTimeSlider } from './components/DebugTimeSlider';
 import { CaptureButton } from './components/CaptureButton';
+import type { SkyAnalysis } from './analysis/skyAnalysis';
 
 const DEFAULT_FOV = 65;
 const FOV_STORAGE_KEY = 'sunmapping_fov';
@@ -29,6 +30,7 @@ export default function App() {
   const [fov, setFov] = useState<number>(loadFov);
   const [showSettings, setShowSettings] = useState(false);
   const [debugHour, setDebugHour] = useState<number | null>(null);
+  const [skyAnalysis, setSkyAnalysis] = useState<SkyAnalysis | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -50,6 +52,10 @@ export default function App() {
     try { localStorage.setItem(FOV_STORAGE_KEY, String(v)); } catch {}
   }
 
+  const handleSkyAnalysis = useCallback((a: SkyAnalysis | null) => {
+    setSkyAnalysis(a);
+  }, []);
+
   const errors: string[] = [];
   if (camera.error) errors.push(camera.error);
   if (geo.error) errors.push(geo.error);
@@ -67,6 +73,7 @@ export default function App() {
         fovH={fov}
         videoRef={videoRef}
         overlayRef={overlayRef}
+        onSkyAnalysis={handleSkyAnalysis}
       />
 
       {/* Landscape warning — shown via CSS @media only */}
@@ -96,7 +103,7 @@ export default function App() {
 
       {/* Bottom bar */}
       <div className="bottom-bar">
-        <StatusPanel geo={geo} orientation={orientation} sun={sun} fov={fov} />
+        <StatusPanel geo={geo} orientation={orientation} sun={sun} fov={fov} skyAnalysis={skyAnalysis} />
         <CaptureButton videoRef={videoRef} overlayRef={overlayRef} />
       </div>
     </div>

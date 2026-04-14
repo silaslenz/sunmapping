@@ -1,19 +1,21 @@
 import type { GeoState } from '../hooks/useGeolocation';
 import type { OrientationState } from '../hooks/useDeviceOrientation';
 import type { SunPosition } from '../hooks/useSunPosition';
+import type { SkyAnalysis } from '../analysis/skyAnalysis';
 
 interface Props {
   geo: GeoState;
   orientation: OrientationState;
   sun: SunPosition | null;
   fov: number;
+  skyAnalysis: SkyAnalysis | null;
 }
 
 function fmt(v: number | null, decimals = 1): string {
   return v == null ? '—' : v.toFixed(decimals);
 }
 
-export function StatusPanel({ geo, orientation, sun, fov }: Props) {
+export function StatusPanel({ geo, orientation, sun, fov, skyAnalysis }: Props) {
   return (
     <div className="status-panel">
       <div className="status-panel__row">
@@ -47,6 +49,24 @@ export function StatusPanel({ geo, orientation, sun, fov }: Props) {
       <div className="status-panel__row">
         <span className="status-panel__key">FoV</span>
         <span className="status-panel__val">{fov}°</span>
+      </div>
+      <div className="status-panel__row">
+        <span className="status-panel__key">Sky</span>
+        <span className="status-panel__val">
+          {skyAnalysis
+            ? `${(skyAnalysis.skyFraction * 100).toFixed(0)}% of frame`
+            : '—'}
+        </span>
+      </div>
+      <div className="status-panel__row">
+        <span className="status-panel__key">Sun vis</span>
+        <span className="status-panel__val">
+          {skyAnalysis
+            ? skyAnalysis.sunDetected
+              ? 'Visible in frame'
+              : 'Not detected'
+            : '—'}
+        </span>
       </div>
       {!orientation.absolute && orientation.supported && (
         <div className="status-panel__warn">
