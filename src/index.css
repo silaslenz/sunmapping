@@ -332,3 +332,43 @@ html, body {
   font-size: 0.72rem;
   color: #777;
 }
+
+/* =============================================
+   Debug time slider
+   ============================================= */
+.debug-time-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.debug-time-slider__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.debug-time-slider__checkbox {
+  accent-color: #ffe600;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.debug-time-slider__value {
+  color: #ffe600;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.debug-time-slider__input {
+  width: 100%;
+  accent-color: #ffe600;
+  cursor: pointer;
+}

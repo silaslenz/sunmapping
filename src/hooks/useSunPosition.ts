@@ -8,7 +8,17 @@ export interface SunPosition {
   altitude: number;
 }
 
-export function useSunPosition(lat: number | null, lon: number | null): SunPosition | null {
+/**
+ * @param lat - Latitude in decimal degrees.
+ * @param lon - Longitude in decimal degrees.
+ * @param debugHour - If set (0–23), override the current time with this hour
+ *                    (using today's date) for debugging sun position.
+ */
+export function useSunPosition(
+  lat: number | null,
+  lon: number | null,
+  debugHour: number | null = null,
+): SunPosition | null {
   const [position, setPosition] = useState<SunPosition | null>(null);
 
   useEffect(() => {
@@ -19,11 +29,19 @@ export function useSunPosition(lat: number | null, lon: number | null): SunPosit
 
     function compute() {
       if (lat == null || lon == null) return;
-      const pos = SunCalc.getPosition(new Date(), lat, lon);
+
+      let date: Date;
+      if (debugHour != null) {
+        date = new Date();
+        date.setHours(debugHour, 0, 0, 0);
+      } else {
+        date = new Date();
+      }
+
+      const pos = SunCalc.getPosition(date, lat, lon);
 
       // SunCalc azimuth: radians from south, increasing westward.
       // Convert to compass degrees (0 = north, CW):
-      //   south = 180°, west = 270°, north = 0°/360°
       const azimuthDeg = ((pos.azimuth * 180) / Math.PI + 180 + 360) % 360;
       const altitudeDeg = (pos.altitude * 180) / Math.PI;
 
@@ -33,7 +51,7 @@ export function useSunPosition(lat: number | null, lon: number | null): SunPosit
     compute();
     const interval = setInterval(compute, 1000);
     return () => clearInterval(interval);
-  }, [lat, lon]);
+  }, [lat, lon, debugHour]);
 
   return position;
 }

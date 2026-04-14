@@ -7,6 +7,7 @@ import { PermissionGate } from './components/PermissionGate';
 import { SunOverlay } from './components/SunOverlay';
 import { StatusPanel } from './components/StatusPanel';
 import { FovSlider } from './components/FovSlider';
+import { DebugTimeSlider } from './components/DebugTimeSlider';
 import { CaptureButton } from './components/CaptureButton';
 
 const DEFAULT_FOV = 65;
@@ -27,13 +28,14 @@ export default function App() {
   const [started, setStarted] = useState(false);
   const [fov, setFov] = useState<number>(loadFov);
   const [showSettings, setShowSettings] = useState(false);
+  const [debugHour, setDebugHour] = useState<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
   const geo = useGeolocation();
   const orientation = useDeviceOrientation();
-  const sun = useSunPosition(geo.lat, geo.lon);
+  const sun = useSunPosition(geo.lat, geo.lon, debugHour);
   const camera = useCameraStream(started);
 
   function handleFovChange(v: number) {
@@ -76,6 +78,7 @@ export default function App() {
       {showSettings && (
         <div className="settings-drawer">
           <FovSlider fov={fov} onChange={handleFovChange} />
+          <DebugTimeSlider debugHour={debugHour} onChange={setDebugHour} />
         </div>
       )}
 
