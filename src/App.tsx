@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useDeviceOrientation } from './hooks/useDeviceOrientation';
 import { useSunPosition } from './hooks/useSunPosition';
@@ -33,6 +33,13 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
+  // Lock to portrait on mount
+  useEffect(() => {
+    screen.orientation?.lock?.('portrait-primary').catch(() => {
+      // lock() rejected — not supported outside fullscreen/PWA, or not available.
+    });
+  }, []);
+
   const geo = useGeolocation();
   const orientation = useDeviceOrientation();
   const sun = useSunPosition(geo.lat, geo.lon, debugHour);
@@ -61,6 +68,11 @@ export default function App() {
         videoRef={videoRef}
         overlayRef={overlayRef}
       />
+
+      {/* Landscape warning — shown via CSS @media only */}
+      <div className="landscape-warning">
+        <p>Please rotate your phone to portrait mode</p>
+      </div>
 
       {/* Top bar */}
       <div className="top-bar">

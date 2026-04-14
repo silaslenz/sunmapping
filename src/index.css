@@ -180,6 +180,33 @@ html, body {
 }
 
 /* =============================================
+   Landscape warning
+   ============================================= */
+.landscape-warning {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.92);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px;
+}
+
+.landscape-warning p {
+  color: #ffe600;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+@media (orientation: landscape) {
+  .landscape-warning {
+    display: flex;
+  }
+}
+
+/* =============================================
    Sun overlay (camera + canvas)
    ============================================= */
 .sun-overlay {
