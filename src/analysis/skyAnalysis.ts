@@ -135,16 +135,16 @@ function findSkyBoundary(
 
   // Adaptive threshold: base it on the frame's average luminance.
   // Dimmer scenes need a lower gradient threshold.
-  // Scale factor: at avgLum=200 (bright day), threshold ~12.
-  // At avgLum=30 (dusk/night), threshold ~4.
-  const gradThreshold = Math.max(3, 4 + (avgLum / 255) * 10);
-  const colourThreshold = Math.max(4, 5 + (avgLum / 255) * 12);
+  // Scale factor: at avgLum=200 (bright day), threshold ~18.
+  // At avgLum=30 (dusk/night), threshold ~5.
+  const gradThreshold = Math.max(4, 5 + (avgLum / 255) * 14);
+  const colourThreshold = Math.max(5, 6 + (avgLum / 255) * 16);
 
   // Scan from top: find the first row where the combined texture signal
   // exceeds the threshold, sustained for a few rows.
   let boundary = 0;
   let consecutiveHigh = 0;
-  const SUSTAIN = 2; // rows in a row needed to confirm boundary
+  const SUSTAIN = 3; // rows in a row needed to confirm boundary
 
   for (let y = 0; y < h; y++) {
     const isTextured =
