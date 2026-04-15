@@ -201,7 +201,7 @@ function drawSkyline(
 
   // --- Tint continuing-sky pixels below the skyline (green-ish) ---
   // Draw each sky-mask pixel below the skyline as a small rect
-  ctx.fillStyle = 'rgba(100, 255, 180, 0.15)';
+  ctx.fillStyle = 'rgba(100, 255, 180, 0.3)';
   for (let ay = 0; ay < height; ay++) {
     for (let ax = 0; ax < width; ax++) {
       if (skyMask[ay * width + ax] === 1 && ay >= skyline[ax]) {
