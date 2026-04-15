@@ -62,8 +62,18 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 
       ctx.clearRect(0, 0, W, H);
 
-      // --- Sky analysis (throttled) ---
+      // --- Compute the video rect within the screen (object-fit: contain) ---
+      // With contain the full video is visible, letterboxed with black bars.
       const video = videoRef.current;
+      const videoW = video?.videoWidth || 640;
+      const videoH = video?.videoHeight || 480;
+      const containScale = Math.min(W / videoW, H / videoH);
+      const vidW = videoW * containScale;  // displayed video width
+      const vidH = videoH * containScale;  // displayed video height
+      const vidX = (W - vidW) / 2;         // left offset of video rect
+      const vidY = (H - vidH) / 2;         // top offset of video rect
+
+      // --- Sky analysis (throttled) ---
       frameCount.current++;
       if (video && frameCount.current % ANALYSIS_INTERVAL === 0) {
         lastAnalysis.current = analyseSky(video);
@@ -71,14 +81,14 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 
       const sky = lastAnalysis.current;
 
-      // --- Draw skyline ---
+      // --- Draw skyline (mapped to video rect, not full canvas) ---
       if (sky) {
-        drawSkyline(ctx, sky, W, H);
+        drawSkyline(ctx, sky, vidW, vidH, vidX, vidY);
       }
 
       // --- Draw detected sun blob ---
       if (sky?.sunDetected && sky.sunCenter) {
-        drawDetectedSun(ctx, sky.sunCenter.nx * W, sky.sunCenter.ny * H);
+        drawDetectedSun(ctx, vidX + sky.sunCenter.nx * vidW, vidY + sky.sunCenter.ny * vidH);
       }
 
       // --- Computed sun position overlay ---
@@ -89,7 +99,6 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
         orientation.tilt != null;
 
       if (!hasData) {
-        // Still report sky analysis even without orientation data
         if (sky && frameCount.current % ANALYSIS_INTERVAL === 0) {
           sky.sunInSky = null;
           onSkyAnalysis?.(sky);
@@ -103,14 +112,9 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const sunAz = sun!.azimuth;
       const sunEl = sun!.altitude;
 
-      const videoW = video?.videoWidth || 1920;
-      const videoH = video?.videoHeight || 1080;
+      // With object-fit: contain, the full video is visible.
+      // The visible FoV equals the camera's native FoV.
       const nativeFovV = fovH * (videoH / videoW);
-      const scale = Math.max(W / videoW, H / videoH);
-      const visibleVideoW = W / scale;
-      const visibleVideoH = H / scale;
-      const visibleFovH = fovH * (visibleVideoW / videoW);
-      const visibleFovV = nativeFovV * (visibleVideoH / videoH);
 
       const dAz = angleDiff(sunAz, heading);
       const dEl = sunEl - tilt;
@@ -119,13 +123,17 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const dAzRot = dAz * Math.cos(rollRad) + dEl * Math.sin(rollRad);
       const dElRot = -dAz * Math.sin(rollRad) + dEl * Math.cos(rollRad);
 
-      const px = W / 2 + (dAzRot / (visibleFovH / 2)) * (W / 2);
-      const py = H / 2 - (dElRot / (visibleFovV / 2)) * (H / 2);
+      // Project onto the video rect (not the full canvas)
+      const px = vidX + vidW / 2 + (dAzRot / (fovH / 2)) * (vidW / 2);
+      const py = vidY + vidH / 2 - (dElRot / (nativeFovV / 2)) * (vidH / 2);
 
       // --- Determine if the computed sun is in the sky region ---
       if (sky && frameCount.current % ANALYSIS_INTERVAL === 0) {
-        const inFrame = px >= 0 && px <= W && py >= 0 && py <= H;
-        sky.sunInSky = inFrame ? isPointInSky(px, py, W, H, sky) : null;
+        const inVideo = px >= vidX && px <= vidX + vidW && py >= vidY && py <= vidY + vidH;
+        // isPointInSky expects coords relative to the video rect
+        sky.sunInSky = inVideo
+          ? isPointInSky(px - vidX, py - vidY, vidW, vidH, sky)
+          : null;
         onSkyAnalysis?.(sky);
       }
 
@@ -135,7 +143,7 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       if (inFrame) {
         drawSunDot(ctx, px, py);
       } else {
-        drawEdgeArrow(ctx, W, H, dAzRot, dElRot, visibleFovH, visibleFovV);
+        drawEdgeArrow(ctx, W, H, dAzRot, dElRot, fovH, nativeFovV);
       }
     }
 
@@ -168,34 +176,36 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 function drawSkyline(
   ctx: CanvasRenderingContext2D,
   sky: SkyAnalysis,
-  W: number,
-  H: number,
+  vidW: number,
+  vidH: number,
+  offsetX: number,
+  offsetY: number,
 ) {
   const { skyline, width, height } = sky;
   if (skyline.length === 0) return;
 
-  const xScale = W / width;
-  const yScale = H / height;
+  const xScale = vidW / width;
+  const yScale = vidH / height;
 
   ctx.beginPath();
-  ctx.moveTo(0, skyline[0] * yScale);
+  ctx.moveTo(offsetX, offsetY + skyline[0] * yScale);
 
   for (let x = 1; x < width; x++) {
-    ctx.lineTo(x * xScale, skyline[x] * yScale);
+    ctx.lineTo(offsetX + x * xScale, offsetY + skyline[x] * yScale);
   }
 
   // Fill sky region (above the line) with a subtle tint
-  ctx.lineTo(W, 0);
-  ctx.lineTo(0, 0);
+  ctx.lineTo(offsetX + vidW, offsetY);
+  ctx.lineTo(offsetX, offsetY);
   ctx.closePath();
   ctx.fillStyle = 'rgba(100, 180, 255, 0.08)';
   ctx.fill();
 
   // Stroke the skyline
   ctx.beginPath();
-  ctx.moveTo(0, skyline[0] * yScale);
+  ctx.moveTo(offsetX, offsetY + skyline[0] * yScale);
   for (let x = 1; x < width; x++) {
-    ctx.lineTo(x * xScale, skyline[x] * yScale);
+    ctx.lineTo(offsetX + x * xScale, offsetY + skyline[x] * yScale);
   }
   ctx.strokeStyle = 'rgba(100, 180, 255, 0.5)';
   ctx.lineWidth = 1.5;

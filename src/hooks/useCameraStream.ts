@@ -23,8 +23,8 @@ export function useCameraStream(active: boolean): CameraState {
       .getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          // No width/height constraints — use the camera's native resolution
+          // (usually 4:3 full sensor, which gives the widest FoV).
         },
         audio: false,
       })
