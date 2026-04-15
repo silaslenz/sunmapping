@@ -141,6 +141,12 @@ function findSkyBoundary(
     boundary = h;
   }
 
+  // The smoothing window smears gradient signal WINDOW rows upward,
+  // so the detected boundary leads the true visual edge. Compensate.
+  if (boundary > 0 && boundary < h) {
+    boundary = Math.min(boundary + WINDOW, h);
+  }
+
   return boundary;
 }
 
