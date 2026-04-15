@@ -113,8 +113,14 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const sunEl = sun!.altitude;
 
       // With object-fit: contain, the full video is visible.
-      // The visible FoV equals the camera's native FoV.
-      const nativeFovV = fovH * (videoH / videoW);
+      // fovH is the *landscape* (sensor) horizontal FoV from the phone spec.
+      // In portrait the sensor is rotated 90°, so:
+      //   portrait vertical FoV = fovH (the sensor's wide dimension)
+      //   portrait horizontal FoV = derived from aspect ratio
+      // Video dimensions are already in portrait orientation (videoW < videoH for 3:4).
+      const portraitFovV = fovH;
+      const halfVRad = (portraitFovV / 2) * Math.PI / 180;
+      const portraitFovH = 2 * Math.atan(Math.tan(halfVRad) * (videoW / videoH)) * 180 / Math.PI;
 
       const dAz = angleDiff(sunAz, heading);
       const dEl = sunEl - tilt;
@@ -124,8 +130,8 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const dElRot = -dAz * Math.sin(rollRad) + dEl * Math.cos(rollRad);
 
       // Project onto the video rect (not the full canvas)
-      const px = vidX + vidW / 2 + (dAzRot / (fovH / 2)) * (vidW / 2);
-      const py = vidY + vidH / 2 - (dElRot / (nativeFovV / 2)) * (vidH / 2);
+      const px = vidX + vidW / 2 + (dAzRot / (portraitFovH / 2)) * (vidW / 2);
+      const py = vidY + vidH / 2 - (dElRot / (portraitFovV / 2)) * (vidH / 2);
 
       // --- Determine if the computed sun is in the sky region ---
       if (sky && frameCount.current % ANALYSIS_INTERVAL === 0) {
@@ -143,7 +149,7 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       if (inFrame) {
         drawSunDot(ctx, px, py);
       } else {
-        drawEdgeArrow(ctx, W, H, dAzRot, dElRot, fovH, nativeFovV);
+        drawEdgeArrow(ctx, W, H, dAzRot, dElRot, portraitFovH, portraitFovV);
       }
     }
 
