@@ -25,9 +25,21 @@ export function CaptureButton({ videoRef, overlayRef }: Props) {
     // Draw the video frame
     ctx.drawImage(video, 0, 0, w, h);
 
-    // Composite the overlay canvas on top (if available and same-ish size)
-    if (overlay) {
-      ctx.drawImage(overlay, 0, 0, w, h);
+    // Composite the overlay canvas on top.
+    // The overlay is screen-sized and includes letterbox offsets — we need to
+    // extract just the region covering the video rect and map it to the
+    // capture canvas (which is video-native-resolution).
+    if (overlay && overlay.width && overlay.height) {
+      const ow = overlay.width;
+      const oh = overlay.height;
+      // Recompute the video rect within the overlay (same logic as SunOverlay draw loop)
+      const containScale = Math.min(ow / w, oh / h);
+      const vidW = w * containScale;
+      const vidH = h * containScale;
+      const vidX = (ow - vidW) / 2;
+      const vidY = (oh - vidH) / 2;
+      // Draw only the video-rect portion of the overlay, stretched to fill the capture
+      ctx.drawImage(overlay, vidX, vidY, vidW, vidH, 0, 0, w, h);
     }
 
     canvas.toBlob((blob) => {

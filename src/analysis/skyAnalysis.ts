@@ -60,11 +60,6 @@ function lumRGB(r: number, g: number, b: number): number {
 // Pass 1 — gradient-based skyline
 // ---------------------------------------------------------------
 
-/** Boundary offset: push the detected edge down by this many rows.
- *  The gradient triggers at the START of an edge, but the visual boundary
- *  is typically 1–3 rows lower. */
-const BOUNDARY_OFFSET = 3;
-
 function findSkyBoundary(
   data: Uint8ClampedArray,
   x: number,
@@ -144,12 +139,6 @@ function findSkyBoundary(
 
   if (consecutiveHigh < SUSTAIN && boundary >= h - 1) {
     boundary = h;
-  }
-
-  // Push boundary down to compensate for early edge triggering,
-  // but only if some sky was actually detected (boundary > 0).
-  if (boundary > 0) {
-    boundary = Math.min(boundary + BOUNDARY_OFFSET, h);
   }
 
   return boundary;
