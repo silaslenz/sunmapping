@@ -146,8 +146,11 @@ function findSkyBoundary(
     boundary = h;
   }
 
-  // Push boundary down to compensate for early edge triggering
-  boundary = Math.min(boundary + BOUNDARY_OFFSET, h);
+  // Push boundary down to compensate for early edge triggering,
+  // but only if some sky was actually detected (boundary > 0).
+  if (boundary > 0) {
+    boundary = Math.min(boundary + BOUNDARY_OFFSET, h);
+  }
 
   return boundary;
 }
@@ -322,16 +325,16 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
       }
     }
     const avgSkyTexture = skyTexCount > 0 ? skyTexSum / skyTexCount : 0;
-    // Below-skyline pixels must have texture below this to qualify
-    const textureLimit = Math.max(avgSkyTexture * 2.5, 20);
+    // Below-skyline pixels must have low texture to qualify as sky
+    const textureLimit = Math.max(avgSkyTexture * 1.8, 12);
 
-    // Scan below skyline for pixels matching the sky profile
+    // Scan below skyline for pixels matching the sky profile (tight tolerance)
     for (let x = 0; x < AW; x++) {
       for (let y = skyline[x]; y < AH; y++) {
         const i = (y * AW + x) * 4;
         const r = d[i], g = d[i + 1], b = d[i + 2];
 
-        if (matchesSkyProfile(r, g, b, profile, 2.5)
+        if (matchesSkyProfile(r, g, b, profile, 1.8)
             && localTexture(d, x, y, AW, AH) < textureLimit) {
           skyMask[y * AW + x] = 1;
         }
