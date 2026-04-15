@@ -1,22 +1,21 @@
 /**
  * Sky detection and sun visibility analysis.
  *
- * Strategy: instead of absolute colour thresholds (which break at dusk/dawn/night),
- * we use a **gradient / edge-based** approach per column:
- *   1. Compute per-row luminance + colour variance (texture) for each column.
- *   2. Sky is the smooth, uniform region starting from the top of the frame.
- *   3. The skyline is where texture/gradient suddenly increases (= ground starts).
+ * Two-pass approach:
+ *   Pass 1 — Gradient/edge scan from top to find the main skyline boundary.
+ *   Pass 2 — Characterise the sky's colour profile from the region above the
+ *            skyline, then scan the entire frame for pixels that match,
+ *            producing a full sky mask that captures "continuing sky" visible
+ *            through gaps (under overhangs, between buildings, through trees).
  *
- * Sun detection uses an adaptive threshold relative to the frame's own
- * brightness distribution.
- *
- * Operates on a small downsampled frame (80x60) for performance.
+ * Operates on a small downsampled frame (80×60) for performance.
  */
 
 export interface SkyAnalysis {
-  /** For each column (0..width-1), the row where sky transitions to ground.
-   *  0 means no sky in that column; height means entire column is sky. */
+  /** For each column, the row where the main sky boundary is (top-down). */
   skyline: number[];
+  /** Full sky mask at analysis resolution — 1 = sky, 0 = not sky. */
+  skyMask: Uint8Array;
   /** Width of the analysed frame. */
   width: number;
   /** Height of the analysed frame. */
@@ -53,20 +52,19 @@ function getAnalysisCanvas() {
   return { canvas: analysisCanvas, ctx: analysisCtx! };
 }
 
-/** Luminance of an RGB pixel. */
-function lum(r: number, g: number, b: number): number {
+function lumRGB(r: number, g: number, b: number): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
-/**
- * For a single column, find the sky-ground boundary by scanning top-down
- * and detecting where the image becomes "textured" (high local gradient).
- *
- * The idea: sky (clear, overcast, sunset, twilight, night) is relatively
- * smooth with gentle gradients. Ground (trees, buildings, terrain) has
- * sharp edges and texture. We look for the row where the local vertical
- * gradient spikes.
- */
+// ---------------------------------------------------------------
+// Pass 1 — gradient-based skyline
+// ---------------------------------------------------------------
+
+/** Boundary offset: push the detected edge down by this many rows.
+ *  The gradient triggers at the START of an edge, but the visual boundary
+ *  is typically 1–3 rows lower. */
+const BOUNDARY_OFFSET = 3;
+
 function findSkyBoundary(
   data: Uint8ClampedArray,
   x: number,
@@ -74,46 +72,36 @@ function findSkyBoundary(
   h: number,
   avgLum: number,
 ): number {
-  // Compute vertical gradient magnitude per row for this column.
-  // gradient[y] = abs difference in luminance between row y and y+1,
-  // averaged with the two neighbouring columns for noise reduction.
-  const WINDOW = 3; // vertical smoothing window
+  const WINDOW = 3;
   const gradients = new Float32Array(h);
 
   for (let y = 0; y < h - 1; y++) {
     let grad = 0;
     let count = 0;
-    // Average over a few neighbouring columns for stability
     for (let dx = -1; dx <= 1; dx++) {
       const cx = x + dx;
       if (cx < 0 || cx >= w) continue;
       const i0 = (y * w + cx) * 4;
       const i1 = ((y + 1) * w + cx) * 4;
-      const l0 = lum(data[i0], data[i0 + 1], data[i0 + 2]);
-      const l1 = lum(data[i1], data[i1 + 1], data[i1 + 2]);
+      const l0 = lumRGB(data[i0], data[i0 + 1], data[i0 + 2]);
+      const l1 = lumRGB(data[i1], data[i1 + 1], data[i1 + 2]);
       grad += Math.abs(l1 - l0);
       count++;
     }
     gradients[y] = count > 0 ? grad / count : 0;
   }
 
-  // Smooth the gradient signal with a small moving average
   const smooth = new Float32Array(h);
   for (let y = 0; y < h; y++) {
     let sum = 0;
     let n = 0;
     for (let dy = -WINDOW; dy <= WINDOW; dy++) {
       const yy = y + dy;
-      if (yy >= 0 && yy < h) {
-        sum += gradients[yy];
-        n++;
-      }
+      if (yy >= 0 && yy < h) { sum += gradients[yy]; n++; }
     }
     smooth[y] = sum / n;
   }
 
-  // Also compute a "colour variance" measure per row — sky is uniform,
-  // ground is varied. Look at horizontal colour differences around this column.
   const colourVar = new Float32Array(h);
   for (let y = 0; y < h; y++) {
     let variance = 0;
@@ -124,32 +112,24 @@ function findSkyBoundary(
       if (cx < 0 || nx >= w) continue;
       const i0 = (y * w + cx) * 4;
       const i1 = (y * w + nx) * 4;
-      const dr = Math.abs(data[i0] - data[i1]);
-      const dg = Math.abs(data[i0 + 1] - data[i1 + 1]);
-      const db = Math.abs(data[i0 + 2] - data[i1 + 2]);
-      variance += dr + dg + db;
+      variance += Math.abs(data[i0] - data[i1])
+                + Math.abs(data[i0 + 1] - data[i1 + 1])
+                + Math.abs(data[i0 + 2] - data[i1 + 2]);
       count++;
     }
     colourVar[y] = count > 0 ? variance / count : 0;
   }
 
-  // Adaptive threshold: base it on the frame's average luminance.
-  // Dimmer scenes need a lower gradient threshold.
-  // Scale factor: at avgLum=200 (bright day), threshold ~18.
-  // At avgLum=30 (dusk/night), threshold ~5.
   const gradThreshold = Math.max(4, 5 + (avgLum / 255) * 14);
   const colourThreshold = Math.max(5, 6 + (avgLum / 255) * 16);
 
-  // Scan from top: find the first row where the combined texture signal
-  // exceeds the threshold, sustained for a few rows.
   let boundary = 0;
   let consecutiveHigh = 0;
-  const SUSTAIN = 3; // rows in a row needed to confirm boundary
+  const SUSTAIN = 3;
 
   for (let y = 0; y < h; y++) {
     const isTextured =
       smooth[y] > gradThreshold || colourVar[y] > colourThreshold;
-
     if (isTextured) {
       consecutiveHigh++;
       if (consecutiveHigh >= SUSTAIN) {
@@ -162,22 +142,112 @@ function findSkyBoundary(
     }
   }
 
-  // If we scanned the whole column without finding texture, it's all sky
   if (consecutiveHigh < SUSTAIN && boundary >= h - 1) {
     boundary = h;
   }
 
+  // Push boundary down to compensate for early edge triggering
+  boundary = Math.min(boundary + BOUNDARY_OFFSET, h);
+
   return boundary;
 }
 
+// ---------------------------------------------------------------
+// Pass 2 — colour-profile sky mask
+// ---------------------------------------------------------------
+
+interface SkyProfile {
+  meanR: number; meanG: number; meanB: number; meanL: number;
+  stdR: number; stdG: number; stdB: number; stdL: number;
+}
+
+/** Compute the colour profile of the sky region above the skyline. */
+function computeSkyProfile(
+  data: Uint8ClampedArray,
+  skyline: number[],
+  w: number,
+): SkyProfile | null {
+  let sumR = 0, sumG = 0, sumB = 0, sumL = 0;
+  let sumR2 = 0, sumG2 = 0, sumB2 = 0, sumL2 = 0;
+  let count = 0;
+
+  for (let x = 0; x < w; x++) {
+    const bound = skyline[x];
+    for (let y = 0; y < bound; y++) {
+      const i = (y * w + x) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const l = lumRGB(r, g, b);
+      sumR += r; sumG += g; sumB += b; sumL += l;
+      sumR2 += r * r; sumG2 += g * g; sumB2 += b * b; sumL2 += l * l;
+      count++;
+    }
+  }
+
+  if (count < 20) return null; // not enough sky pixels to profile
+
+  const n = count;
+  const meanR = sumR / n, meanG = sumG / n, meanB = sumB / n, meanL = sumL / n;
+  const stdR = Math.sqrt(Math.max(0, sumR2 / n - meanR * meanR));
+  const stdG = Math.sqrt(Math.max(0, sumG2 / n - meanG * meanG));
+  const stdB = Math.sqrt(Math.max(0, sumB2 / n - meanB * meanB));
+  const stdL = Math.sqrt(Math.max(0, sumL2 / n - meanL * meanL));
+
+  return { meanR, meanG, meanB, meanL, stdR, stdG, stdB, stdL };
+}
+
+/** Check if a pixel matches the sky colour profile. */
+function matchesSkyProfile(
+  r: number, g: number, b: number,
+  profile: SkyProfile,
+  tolerance: number, // number of std deviations
+): boolean {
+  // Add a minimum std of 12 so very uniform skies don't reject everything
+  const tR = Math.max(12, profile.stdR) * tolerance;
+  const tG = Math.max(12, profile.stdG) * tolerance;
+  const tB = Math.max(12, profile.stdB) * tolerance;
+  const tL = Math.max(12, profile.stdL) * tolerance;
+  const l = lumRGB(r, g, b);
+
+  return Math.abs(r - profile.meanR) < tR
+      && Math.abs(g - profile.meanG) < tG
+      && Math.abs(b - profile.meanB) < tB
+      && Math.abs(l - profile.meanL) < tL;
+}
+
+/** Compute local texture (horizontal gradient magnitude) for a pixel. */
+function localTexture(data: Uint8ClampedArray, x: number, y: number, w: number, h: number): number {
+  let sum = 0;
+  let count = 0;
+  for (let dx = -1; dx <= 1; dx++) {
+    const cx = x + dx;
+    const nx = cx + 1;
+    if (cx < 0 || nx >= w) continue;
+    const i0 = (y * w + cx) * 4;
+    const i1 = (y * w + nx) * 4;
+    sum += Math.abs(data[i0] - data[i1])
+         + Math.abs(data[i0 + 1] - data[i1 + 1])
+         + Math.abs(data[i0 + 2] - data[i1 + 2]);
+    count++;
+  }
+  // Also vertical gradient
+  if (y > 0 && y < h - 1) {
+    const iUp = ((y - 1) * w + x) * 4;
+    const iDn = ((y + 1) * w + x) * 4;
+    sum += Math.abs(data[iUp] - data[iDn])
+         + Math.abs(data[iUp + 1] - data[iDn + 1])
+         + Math.abs(data[iUp + 2] - data[iDn + 2]);
+    count++;
+  }
+  return count > 0 ? sum / count : 0;
+}
+
+// ---------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------
+
 /**
  * Check whether a screen-space pixel coordinate falls within the sky region.
- * @param px  Screen X coordinate.
- * @param py  Screen Y coordinate.
- * @param screenW  Screen/canvas width.
- * @param screenH  Screen/canvas height.
- * @param sky  The current SkyAnalysis result.
- * @returns true if the point is in the sky, false if on the ground or out of frame.
+ * Uses the full sky mask, so it detects continuing sky below the main skyline.
  */
 export function isPointInSky(
   px: number,
@@ -186,13 +256,10 @@ export function isPointInSky(
   screenH: number,
   sky: SkyAnalysis,
 ): boolean {
-  // Map screen coords to analysis grid coords
-  const ax = (px / screenW) * sky.width;
-  const ay = (py / screenH) * sky.height;
-
-  const col = Math.round(ax);
-  if (col < 0 || col >= sky.width) return false;
-  return ay < sky.skyline[col];
+  const ax = Math.round((px / screenW) * (sky.width - 1));
+  const ay = Math.round((py / screenH) * (sky.height - 1));
+  if (ax < 0 || ax >= sky.width || ay < 0 || ay >= sky.height) return false;
+  return sky.skyMask[ay * sky.width + ax] === 1;
 }
 
 export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
@@ -205,24 +272,20 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   const imageData = ctx.getImageData(0, 0, AW, AH);
   const d = imageData.data;
 
-  // --- Compute frame average luminance for adaptive thresholds ---
+  // --- Frame average luminance ---
   let lumSum = 0;
   for (let i = 0; i < d.length; i += 4) {
-    lumSum += lum(d[i], d[i + 1], d[i + 2]);
+    lumSum += lumRGB(d[i], d[i + 1], d[i + 2]);
   }
   const avgLum = lumSum / (AW * AH);
 
-  // --- Per-column skyline detection ---
+  // --- Pass 1: per-column skyline ---
   const skyline = new Array<number>(AW);
-  let skyPixelCount = 0;
-
   for (let x = 0; x < AW; x++) {
     skyline[x] = findSkyBoundary(d, x, AW, AH, avgLum);
-    skyPixelCount += skyline[x];
   }
 
-  // --- Smooth the skyline to reduce jitter ---
-  // Median filter across columns (window = 5)
+  // Median-filter the skyline (window = 5) to smooth jitter
   const smoothed = new Array<number>(AW);
   for (let x = 0; x < AW; x++) {
     const vals: number[] = [];
@@ -235,23 +298,64 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   }
   for (let x = 0; x < AW; x++) skyline[x] = smoothed[x];
 
+  // --- Pass 2: full sky mask ---
+  const skyMask = new Uint8Array(AW * AH);
+
+  // Fill everything above the skyline
+  for (let x = 0; x < AW; x++) {
+    for (let y = 0; y < skyline[x]; y++) {
+      skyMask[y * AW + x] = 1;
+    }
+  }
+
+  // Compute sky colour profile from the known sky region
+  const profile = computeSkyProfile(d, skyline, AW);
+
+  if (profile) {
+    // Compute average texture in the sky region for comparison
+    let skyTexSum = 0;
+    let skyTexCount = 0;
+    for (let x = 0; x < AW; x++) {
+      for (let y = 0; y < skyline[x]; y++) {
+        skyTexSum += localTexture(d, x, y, AW, AH);
+        skyTexCount++;
+      }
+    }
+    const avgSkyTexture = skyTexCount > 0 ? skyTexSum / skyTexCount : 0;
+    // Below-skyline pixels must have texture below this to qualify
+    const textureLimit = Math.max(avgSkyTexture * 2.5, 20);
+
+    // Scan below skyline for pixels matching the sky profile
+    for (let x = 0; x < AW; x++) {
+      for (let y = skyline[x]; y < AH; y++) {
+        const i = (y * AW + x) * 4;
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+
+        if (matchesSkyProfile(r, g, b, profile, 2.5)
+            && localTexture(d, x, y, AW, AH) < textureLimit) {
+          skyMask[y * AW + x] = 1;
+        }
+      }
+    }
+  }
+
+  // Count total sky pixels
+  let skyPixelCount = 0;
+  for (let i = 0; i < skyMask.length; i++) {
+    if (skyMask[i]) skyPixelCount++;
+  }
+
   // --- Sun detection ---
-  // Adaptive: find pixels significantly brighter than the frame average.
-  // The sun (even at dusk) is the brightest thing in the sky.
-  // Use a threshold relative to the max luminance in the frame.
   let maxLum = 0;
   for (let i = 0; i < d.length; i += 4) {
-    const l = lum(d[i], d[i + 1], d[i + 2]);
+    const l = lumRGB(d[i], d[i + 1], d[i + 2]);
     if (l > maxLum) maxLum = l;
   }
 
-  // Sun threshold: must be close to the brightest pixels AND substantially
-  // brighter than the average. At evening the overall frame is dim but the
-  // sun (if visible) still saturates or nearly saturates.
   const sunThresh = Math.max(
-    maxLum * 0.85,          // within 15% of the brightest pixel
-    avgLum + (maxLum - avgLum) * 0.7, // well above average
-    avgLum + 30,            // absolute minimum gap above average
+    maxLum * 0.85,
+    avgLum + (maxLum - avgLum) * 0.7,
+    avgLum + 30,
   );
 
   let brightCount = 0;
@@ -261,7 +365,7 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   for (let y = 0; y < AH; y++) {
     for (let x = 0; x < AW; x++) {
       const i = (y * AW + x) * 4;
-      const l = lum(d[i], d[i + 1], d[i + 2]);
+      const l = lumRGB(d[i], d[i + 1], d[i + 2]);
       if (l >= sunThresh) {
         brightCount++;
         bxSum += x;
@@ -276,20 +380,12 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   let sunCenter: { nx: number; ny: number } | null = null;
   let sunRadius = 0;
 
-  // Require:
-  //  - at least 2 bright pixels (not noise)
-  //  - less than 25% of frame (not a uniformly bright scene)
-  //  - the bright region must have meaningful contrast above average
-  //    (maxLum - avgLum > 20 prevents flat, uniformly lit scenes triggering)
   if (brightCount >= 2 && brightFrac < 0.25 && (maxLum - avgLum) > 20) {
     const cx = bxSum / brightCount;
     const cy = bySum / brightCount;
-
-    // Check if the bright cluster center is in the sky region
-    const col = Math.round(cx);
-    const inSky = col >= 0 && col < AW && cy < skyline[col];
-
-    if (inSky) {
+    // Check sky mask instead of just skyline
+    const mi = Math.round(cy) * AW + Math.round(cx);
+    if (mi >= 0 && mi < skyMask.length && skyMask[mi]) {
       sunDetected = true;
       sunCenter = { nx: cx / AW, ny: cy / AH };
       sunRadius = Math.sqrt(brightCount / Math.PI) / Math.max(AW, AH);
@@ -298,12 +394,13 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
 
   return {
     skyline,
+    skyMask,
     width: AW,
     height: AH,
     skyFraction: skyPixelCount / totalPixels,
     sunDetected,
     sunCenter,
     sunRadius,
-    sunInSky: null, // set by overlay after computing sun pixel position
+    sunInSky: null,
   };
 }

@@ -172,7 +172,7 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 // Drawing helpers
 // ===================================================================
 
-/** Draw the skyline boundary as a smooth translucent line. */
+/** Draw the skyline boundary and the full sky mask. */
 function drawSkyline(
   ctx: CanvasRenderingContext2D,
   sky: SkyAnalysis,
@@ -181,27 +181,41 @@ function drawSkyline(
   offsetX: number,
   offsetY: number,
 ) {
-  const { skyline, width, height } = sky;
+  const { skyline, skyMask, width, height } = sky;
   if (skyline.length === 0) return;
 
   const xScale = vidW / width;
   const yScale = vidH / height;
 
+  // --- Tint above-skyline sky (subtle blue) ---
   ctx.beginPath();
   ctx.moveTo(offsetX, offsetY + skyline[0] * yScale);
-
   for (let x = 1; x < width; x++) {
     ctx.lineTo(offsetX + x * xScale, offsetY + skyline[x] * yScale);
   }
-
-  // Fill sky region (above the line) with a subtle tint
   ctx.lineTo(offsetX + vidW, offsetY);
   ctx.lineTo(offsetX, offsetY);
   ctx.closePath();
   ctx.fillStyle = 'rgba(100, 180, 255, 0.08)';
   ctx.fill();
 
-  // Stroke the skyline
+  // --- Tint continuing-sky pixels below the skyline (green-ish) ---
+  // Draw each sky-mask pixel below the skyline as a small rect
+  ctx.fillStyle = 'rgba(100, 255, 180, 0.15)';
+  for (let ay = 0; ay < height; ay++) {
+    for (let ax = 0; ax < width; ax++) {
+      if (skyMask[ay * width + ax] === 1 && ay >= skyline[ax]) {
+        ctx.fillRect(
+          offsetX + ax * xScale,
+          offsetY + ay * yScale,
+          Math.ceil(xScale),
+          Math.ceil(yScale),
+        );
+      }
+    }
+  }
+
+  // --- Stroke the skyline ---
   ctx.beginPath();
   ctx.moveTo(offsetX, offsetY + skyline[0] * yScale);
   for (let x = 1; x < width; x++) {
