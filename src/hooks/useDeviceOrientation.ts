@@ -11,87 +11,82 @@ export interface OrientationState {
   absolute: boolean;
   /** Whether the browser has any orientation support at all. */
   supported: boolean;
+  /**
+   * Camera axes in ENU world-space, computed from the W3C rotation matrix.
+   * 9 floats: [rightE, rightN, rightU, upE, upN, upU, lookE, lookN, lookU].
+   * Null if orientation is unavailable.
+   */
+  cameraAxes: Float64Array | null;
 }
 
 /**
- * Compute camera-space heading/tilt/roll from raw DeviceOrientation angles
- * using a full ZXY rotation matrix, avoiding gimbal-coupling artefacts.
+ * Build the W3C rotation matrix R = Rz(alpha) · Rx(beta) · Ry(gamma).
  *
- * Browser convention (ZXY intrinsic Euler, world→device):
- *   alpha: yaw   around world-Z, CCW from north, 0–360°
- *   beta:  pitch around device-X, -180–180°  (90 = upright portrait)
- *   gamma: roll  around device-Y, -90–90°    (0 = no roll)
+ * Per the spec, R maps device-frame → world-frame (ENU).
+ * Alpha is CCW from north (opposite of compass heading).
  *
- * World frame: X = East, Y = North, Z = Up  (ENU)
- * Device frame in portrait-upright: X = right, Y = up, Z = out of screen (back camera = -Z)
- *
- * We build R (world→device), then find the camera's look direction (-Z device axis)
- * and the camera's up direction (+Y device axis) in world space by using R^T (=R^-1
- * since R is orthogonal).  From those we derive heading, tilt and roll directly.
+ * Camera axes in world coords:
+ *   right = R · (1,0,0) = R column 0
+ *   up    = R · (0,1,0) = R column 1
+ *   look  = R · (0,0,-1) = -(R column 2)
  */
-function toCamera(alpha: number, beta: number, gamma: number) {
-  const toRad = Math.PI / 180;
-  const a = alpha * toRad;   // yaw
-  const b = beta  * toRad;   // pitch
-  const g = gamma * toRad;   // roll
+function computeOrientation(alpha: number, beta: number, gamma: number) {
+  const d2r = Math.PI / 180;
+  const a = alpha * d2r;
+  const b = beta  * d2r;
+  const g = gamma * d2r;
 
-  // ZXY rotation matrix (world → device), standard browser definition.
-  // R = Rz(a) · Rx(b) · Ry(g)
   const sa = Math.sin(a), ca = Math.cos(a);
   const sb = Math.sin(b), cb = Math.cos(b);
   const sg = Math.sin(g), cg = Math.cos(g);
 
-  // Row-major R[row][col]
-  const R = [
-    [ ca * cg - sa * sb * sg,  -sa * cb,  ca * sg + sa * sb * cg ],
-    [ sa * cg + ca * sb * sg,   ca * cb,  sa * sg - ca * sb * cg ],
-    [ -cb * sg,                 sb,        cb * cg                ],
-  ];
+  // R = Rz(a) · Rx(b) · Ry(g), row-major:
+  // Row 0: [ca*cg - sa*sb*sg,  -sa*cb,  ca*sg + sa*sb*cg]
+  // Row 1: [sa*cg + ca*sb*sg,   ca*cb,  sa*sg - ca*sb*cg]
+  // Row 2: [-cb*sg,              sb,      cb*cg          ]
 
-  // Camera look direction is device -Z axis expressed in world coords = R^T col 2 negated
-  // = -R[*][2] transposed  →  -(R[0][2], R[1][2], R[2][2])
-  // But R^T row i = R col i, so the device -Z world direction is:
-  const lookX = -R[0][2];  // East component of look
-  const lookY = -R[1][2];  // North component
-  const lookZ = -R[2][2];  // Up component
+  // Camera right (R column 0):
+  const rightE = ca * cg - sa * sb * sg;
+  const rightN = sa * cg + ca * sb * sg;
+  const rightU = -cb * sg;
 
-  // Heading = compass bearing of the horizontal projection of the look vector
-  // atan2(East, North)  →  clockwise from north
-  const heading = ((Math.atan2(lookX, lookY) * 180 / Math.PI) + 360) % 360;
+  // Camera up (R column 1):
+  const upE = -sa * cb;
+  const upN = ca * cb;
+  const upU = sb;
 
-  // Tilt = elevation angle of the look vector above the horizon
-  const tilt = Math.asin(Math.max(-1, Math.min(1, lookZ))) * 180 / Math.PI;
+  // Camera look = -(R column 2):
+  const lookE = -(ca * sg + sa * sb * cg);
+  const lookN = -(sa * sg - ca * sb * cg);
+  const lookU = -(cb * cg);
 
-  // Roll: project device +Y (up) into world, then measure its rotation around
-  // the look vector relative to "world up projected onto the image plane".
-  // Device +Y world direction = R^T col 1 = (R[0][1], R[1][1], R[2][1])
-  const upX = R[0][1];
-  const upY = R[1][1];
-  const upZ = R[2][1];
+  const axes = new Float64Array(9);
+  axes[0] = rightE; axes[1] = rightN; axes[2] = rightU;
+  axes[3] = upE;    axes[4] = upN;    axes[5] = upU;
+  axes[6] = lookE;  axes[7] = lookN;  axes[8] = lookU;
 
-  // Project world-up (0,0,1) onto the plane perpendicular to look, and compare to
-  // projected device-up to get roll.
-  // Component of world-up along look:
-  const dot = lookZ; // (0,0,1)·look = lookZ
-  const refX = -lookX * dot;
-  const refY = -lookY * dot;
-  const refZ = 1 - lookZ * dot;  // world-up minus its look-component
+  // Derive display-friendly heading / tilt from look vector
+  // heading = compass bearing = CW from north = atan2(East, North)
+  const heading = ((Math.atan2(lookE, lookN) * 180 / Math.PI) + 360) % 360;
+  const tilt = Math.asin(Math.max(-1, Math.min(1, lookU))) * 180 / Math.PI;
 
-  // Component of device-up along look:
-  const dotUp = upX * lookX + upY * lookY + upZ * lookZ;
-  const devX = upX - lookX * dotUp;
-  const devY = upY - lookY * dotUp;
-  const devZ = upZ - lookZ * dotUp;
-
-  // Cross product ref × dev gives the sin of the angle around look
-  const crossX = refY * devZ - refZ * devY;
-  const crossY = refZ * devX - refX * devZ;
-  const crossZ = refX * devY - refY * devX;
-  const sinRoll = crossX * lookX + crossY * lookY + crossZ * lookZ;
-  const cosRoll = refX * devX + refY * devY + refZ * devZ;
+  // Roll = angle of device-up projected into the image plane vs world-up projected
+  const dotLookUp = lookU;
+  const refE = -lookE * dotLookUp;
+  const refN = -lookN * dotLookUp;
+  const refU = 1 - lookU * dotLookUp;
+  const dotDevUp = upE * lookE + upN * lookN + upU * lookU;
+  const devE = upE - lookE * dotDevUp;
+  const devN = upN - lookN * dotDevUp;
+  const devU = upU - lookU * dotDevUp;
+  const cx = refN * devU - refU * devN;
+  const cy = refU * devE - refE * devU;
+  const cz = refE * devN - refN * devE;
+  const sinRoll = cx * lookE + cy * lookN + cz * lookU;
+  const cosRoll = refE * devE + refN * devN + refU * devU;
   const roll = Math.atan2(sinRoll, cosRoll) * 180 / Math.PI;
 
-  return { heading, tilt, roll };
+  return { heading, tilt, roll, cameraAxes: axes };
 }
 
 export function useDeviceOrientation(): OrientationState {
@@ -101,6 +96,7 @@ export function useDeviceOrientation(): OrientationState {
     roll: null,
     absolute: false,
     supported: false,
+    cameraAxes: null,
   });
 
   const gotAbsolute = useRef(false);
@@ -116,19 +112,20 @@ export function useDeviceOrientation(): OrientationState {
       if (e.alpha == null || e.beta == null || e.gamma == null) return;
       gotAbsolute.current = true;
 
-      const { heading, tilt, roll } = toCamera(e.alpha, e.beta, e.gamma);
-      setState({ heading, tilt, roll, absolute: true, supported: true });
+      const o = computeOrientation(e.alpha, e.beta, e.gamma);
+      setState({ ...o, absolute: true, supported: true });
     }
 
     function handleRelative(e: DeviceOrientationEvent) {
       if (gotAbsolute.current) return;
       if (e.beta == null || e.gamma == null) return;
 
-      const { tilt, roll } = toCamera(0, e.beta, e.gamma);
+      const o = computeOrientation(0, e.beta, e.gamma);
       setState({
         heading: null,
-        tilt,
-        roll,
+        tilt: o.tilt,
+        roll: o.roll,
+        cameraAxes: null,
         absolute: false,
         supported: true,
       });
