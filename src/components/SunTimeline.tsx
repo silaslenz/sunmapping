@@ -131,8 +131,16 @@ export function SunTimeline({ lat, lon, cameraAxes, fovH, videoW, videoH, skyAna
             )}
           </div>
           <div className="sun-timeline__labels">
-            <span>{slots[0].label}</span>
-            <span>{slots[slots.length - 1].label}</span>
+            {slots.map((slot, i) => {
+              // Show a label at each full hour
+              if (slot.time.getMinutes() !== 0) return null;
+              const pct = (i / (slots.length - 1)) * 100;
+              return (
+                <span key={i} className="sun-timeline__tick" style={{ left: `${pct}%` }}>
+                  {slot.label}
+                </span>
+              );
+            })}
           </div>
           <div className="sun-timeline__legend">
             <span className="sun-timeline__legend-item"><span className="sun-timeline__dot sun-timeline__dot--visible" /> sky</span>
