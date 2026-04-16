@@ -102,6 +102,7 @@ export default function App() {
           lat={geo.lat}
           lon={geo.lon}
           cameraAxes={orientation.cameraAxes ?? null}
+          currentHeading={orientation.absolute ? orientation.heading : null}
           fovH={fov}
           videoW={videoDims.w}
           videoH={videoDims.h}

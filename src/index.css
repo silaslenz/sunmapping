@@ -342,6 +342,52 @@ html, body {
   color-scheme: dark;
 }
 
+.sun-timeline__sweep-btn {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  color: #eee;
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.sun-timeline__sweep-btn:hover {
+  background: rgba(255,255,255,0.14);
+}
+
+.sun-timeline__sweep-btn--active {
+  background: rgba(255, 230, 0, 0.2);
+  border-color: rgba(255, 230, 0, 0.5);
+  color: #ffe600;
+}
+
+.sun-timeline__sweep-count {
+  font-size: 0.7rem;
+  color: #aaa;
+}
+
+.sun-timeline__reset-btn {
+  background: transparent;
+  border: none;
+  color: #ee6666;
+  font-size: 0.68rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.sun-timeline__reset-btn:hover {
+  color: #ff8888;
+}
+
+.sun-timeline__sweep-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
 .sun-timeline__bar-wrap {
   display: flex;
   flex-direction: column;
