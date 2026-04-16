@@ -4,6 +4,7 @@ import { useDeviceOrientation } from './hooks/useDeviceOrientation';
 import { useSunPosition } from './hooks/useSunPosition';
 import { useCameraStream } from './hooks/useCameraStream';
 import { SunOverlay } from './components/SunOverlay';
+import { SunTimeline } from './components/SunTimeline';
 import { StatusPanel } from './components/StatusPanel';
 import { FovSlider } from './components/FovSlider';
 import { DebugTimeSlider } from './components/DebugTimeSlider';
@@ -26,12 +27,26 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [debugHour, setDebugHour] = useState<number | null>(null);
   const [skyAnalysis, setSkyAnalysis] = useState<SkyAnalysis | null>(null);
+  const [videoDims, setVideoDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     screen.orientation?.lock?.('portrait-primary').catch(() => {});
+  }, []);
+
+  // Track video dimensions once available
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    function onMeta() {
+      if (video) setVideoDims({ w: video.videoWidth, h: video.videoHeight });
+    }
+    video.addEventListener('loadedmetadata', onMeta);
+    // Also check immediately in case already loaded
+    if (video.videoWidth > 0) setVideoDims({ w: video.videoWidth, h: video.videoHeight });
+    return () => video.removeEventListener('loadedmetadata', onMeta);
   }, []);
 
   const geo = useGeolocation();
@@ -83,6 +98,15 @@ export default function App() {
 
       {/* Bottom bar */}
       <div className="bottom-bar">
+        <SunTimeline
+          lat={geo.lat}
+          lon={geo.lon}
+          cameraAxes={orientation.cameraAxes ?? null}
+          fovH={fov}
+          videoW={videoDims.w}
+          videoH={videoDims.h}
+          skyAnalysis={skyAnalysis}
+        />
         <StatusPanel geo={geo} orientation={orientation} sun={sun} fov={fov} skyAnalysis={skyAnalysis} />
         <CaptureButton videoRef={videoRef} overlayRef={overlayRef} />
       </div>

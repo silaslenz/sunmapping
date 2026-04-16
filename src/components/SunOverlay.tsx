@@ -3,6 +3,7 @@ import type { OrientationState } from '../hooks/useDeviceOrientation';
 import type { SunPosition } from '../hooks/useSunPosition';
 import { analyseSky, isPointInSky } from '../analysis/skyAnalysis';
 import type { SkyAnalysis } from '../analysis/skyAnalysis';
+import { projectSun } from '../utils/projection';
 
 interface Props {
   stream: MediaStream | null;
@@ -90,43 +91,20 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       }
 
       const axes = orientation.cameraAxes!;
+      const proj = projectSun(sun!.azimuth, sun!.altitude, axes, portraitFovH, portraitFovV, vidW, vidH);
 
-      // Sun unit vector in ENU world space
-      const sunAzRad = sun!.azimuth * Math.PI / 180;
-      const sunElRad = sun!.altitude * Math.PI / 180;
-      const cosEl = Math.cos(sunElRad);
-      const sE = Math.sin(sunAzRad) * cosEl;  // East
-      const sN = Math.cos(sunAzRad) * cosEl;  // North
-      const sU = Math.sin(sunElRad);           // Up
-
-      // Project sun onto camera axes (right, up, look) stored in cameraAxes
-      const camX = sE * axes[0] + sN * axes[1] + sU * axes[2];  // right
-      const camY = sE * axes[3] + sN * axes[4] + sU * axes[5];  // up
-      const camZ = sE * axes[6] + sN * axes[7] + sU * axes[8];  // look (depth)
-
-      // FoV → focal length in normalised image coords
-      const fH = 1 / Math.tan((portraitFovH / 2) * Math.PI / 180);
-      const fV = 1 / Math.tan((portraitFovV / 2) * Math.PI / 180);
-
-      // Perspective projection
-      let px: number, py: number;
-      if (camZ > 0.001) {
-        px = vidX + vidW / 2 + (camX / camZ) * fH * (vidW / 2);
-        py = vidY + vidH / 2 - (camY / camZ) * fV * (vidH / 2);
-      } else {
-        // Sun is behind camera — push far offscreen for edge arrow
-        px = camX >= 0 ? W * 10 : -W * 10;
-        py = camY >= 0 ? H * 10 : -H * 10;
-      }
+      // Offset projection into full canvas coords (video rect has letterbox offset)
+      const px = vidX + proj.x;
+      const py = vidY + proj.y;
 
       // Angular offset for edge arrow direction
-      const dAzRot = camZ > 0.001 ? (camX / camZ) * (180 / Math.PI) : camX * 1000;
-      const dElRot = camZ > 0.001 ? (camY / camZ) * (180 / Math.PI) : camY * 1000;
+      const dAzRot = proj.camZ > 0.001 ? (proj.camX / proj.camZ) * (180 / Math.PI) : proj.camX * 1000;
+      const dElRot = proj.camZ > 0.001 ? (proj.camY / proj.camZ) * (180 / Math.PI) : proj.camY * 1000;
 
       if (sky && frameCount.current % ANALYSIS_INTERVAL === 0) {
-        const inVideo = px >= vidX && px <= vidX + vidW && py >= vidY && py <= vidY + vidH;
+        const inVideo = proj.x >= 0 && proj.x <= vidW && proj.y >= 0 && proj.y <= vidH;
         sky.sunInSky = inVideo
-          ? isPointInSky(px - vidX, py - vidY, vidW, vidH, sky)
+          ? isPointInSky(proj.x, proj.y, vidW, vidH, sky)
           : null;
         onSkyAnalysis?.(sky);
       }

@@ -307,3 +307,126 @@ html, body {
   accent-color: #ffe600;
   cursor: pointer;
 }
+
+/* =============================================
+   Sun visibility timeline
+   ============================================= */
+.sun-timeline {
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.sun-timeline__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.sun-timeline__title {
+  font-size: 0.75rem;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sun-timeline__date {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  color: #eee;
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  color-scheme: dark;
+}
+
+.sun-timeline__bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sun-timeline__bar {
+  position: relative;
+  display: flex;
+  height: 18px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.sun-timeline__slot {
+  flex: 1;
+  min-width: 0;
+}
+
+.sun-timeline__slot--visible {
+  background: rgba(100, 220, 80, 0.75);
+}
+
+.sun-timeline__slot--terrain {
+  background: rgba(220, 80, 60, 0.65);
+}
+
+.sun-timeline__slot--outside {
+  background: rgba(120, 120, 120, 0.4);
+}
+
+.sun-timeline__now {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: #ffe600;
+  border-radius: 1px;
+  pointer-events: none;
+  box-shadow: 0 0 4px rgba(255, 230, 0, 0.6);
+}
+
+.sun-timeline__labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: #888;
+}
+
+.sun-timeline__legend {
+  display: flex;
+  gap: 10px;
+  font-size: 0.62rem;
+  color: #999;
+  margin-top: 2px;
+}
+
+.sun-timeline__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.sun-timeline__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.sun-timeline__dot--visible {
+  background: rgba(100, 220, 80, 0.75);
+}
+
+.sun-timeline__dot--terrain {
+  background: rgba(220, 80, 60, 0.65);
+}
+
+.sun-timeline__dot--outside {
+  background: rgba(120, 120, 120, 0.4);
+}
+
+.sun-timeline__empty {
+  font-size: 0.72rem;
+  color: #777;
+  text-align: center;
+  padding: 4px 0;
+}
