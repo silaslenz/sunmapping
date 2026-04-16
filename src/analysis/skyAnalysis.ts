@@ -281,13 +281,13 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   const avgLum = lumSum / (AW * AH);
 
   // --- Pass 1: per-column skyline ---
-  const skyline = new Array<number>(AW);
+  const skyline = Array.from<number>({ length: AW });
   for (let x = 0; x < AW; x++) {
     skyline[x] = findSkyBoundary(d, x, AW, AH, avgLum);
   }
 
   // Median-filter the skyline (window = 5) to smooth jitter
-  const smoothed = new Array<number>(AW);
+  const smoothed = Array.from<number>({ length: AW });
   for (let x = 0; x < AW; x++) {
     const vals: number[] = [];
     for (let dx = -2; dx <= 2; dx++) {
