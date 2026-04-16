@@ -94,16 +94,78 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const tilt = orientation.tilt!;
       const roll = orientation.roll ?? 0;
 
-      // Inline angleDiff: normalize (a - b) to [-180, 180]
-      const dAz = ((sun!.azimuth - heading) + 540) % 360 - 180;
-      const dEl = sun!.altitude - tilt;
+      // Build the sun unit vector in world space (ENU: X=East, Y=North, Z=Up)
+      const sunAzRad = sun!.azimuth * Math.PI / 180;
+      const sunElRad = sun!.altitude * Math.PI / 180;
+      const sunWorld = [
+        Math.sin(sunAzRad) * Math.cos(sunElRad),  // East
+        Math.cos(sunAzRad) * Math.cos(sunElRad),  // North
+        Math.sin(sunElRad),                        // Up
+      ];
 
-      const rollRad = roll * Math.PI / 180;
-      const dAzRot = dAz * Math.cos(rollRad) + dEl * Math.sin(rollRad);
-      const dElRot = -dAz * Math.sin(rollRad) + dEl * Math.cos(rollRad);
+      // Build the camera rotation matrix (world → camera space).
+      // Camera axes in world space (ENU):
+      //   look = forward (out of back camera, into scene)
+      //   right = camera +X
+      //   up    = camera +Y
+      const hRad = heading * Math.PI / 180;
+      const tRad = tilt    * Math.PI / 180;
+      const rRad = roll    * Math.PI / 180;
 
-      const px = vidX + vidW / 2 + (dAzRot / (portraitFovH / 2)) * (vidW / 2);
-      const py = vidY + vidH / 2 - (dElRot / (portraitFovV / 2)) * (vidH / 2);
+      const sh = Math.sin(hRad), ch = Math.cos(hRad);
+      const st = Math.sin(tRad), ct = Math.cos(tRad);
+      const sr = Math.sin(rRad), cr = Math.cos(rRad);
+
+      // Look direction (camera -Z in world = direction camera points into scene)
+      const lookE =  sh * ct;
+      const lookN =  ch * ct;
+      const lookU =  st;
+
+      // Right vector: rotate world-East by heading then tilt, then roll affects up/right
+      // right = (heading-rotated East) rolled
+      // Unrolled right (at zero roll): perpendicular to look, in the horizontal+tilt plane
+      const rightE0 =  ch;
+      const rightN0 = -sh;
+      const rightU0 =  0;
+
+      // Up vector before roll: perpendicular to look, pointing generally upward
+      const upE0 = -sh * st;
+      const upN0 = -ch * st;
+      const upU0 =  ct;
+
+      // Apply roll around the look axis
+      const rightE = rightE0 * cr + upE0 * sr;
+      const rightN = rightN0 * cr + upN0 * sr;
+      const rightU = rightU0 * cr + upU0 * sr;
+
+      const upE = -rightE0 * sr + upE0 * cr;
+      const upN = -rightN0 * sr + upN0 * cr;
+      const upU = -rightU0 * sr + upU0 * cr;
+
+      // Project sun world vector onto camera axes
+      const [sE, sN, sU] = sunWorld;
+      const camX =  sE * rightE + sN * rightN + sU * rightU;  // right = +screen-X
+      const camY =  sE * upE    + sN * upN    + sU * upU;     // up    = +screen-Y (inverted below)
+      const camZ =  sE * lookE  + sN * lookN  + sU * lookU;   // depth (>0 = in front)
+
+      // Convert FoV to focal lengths in normalised image coords
+      const fH = 1 / Math.tan((portraitFovH / 2) * Math.PI / 180);
+      const fV = 1 / Math.tan((portraitFovV / 2) * Math.PI / 180);
+
+      // Project: divide by depth. camZ <= 0 means sun is behind camera.
+      let px: number, py: number;
+      if (camZ > 0.001) {
+        px = vidX + vidW / 2 + (camX / camZ) * fH * (vidW / 2);
+        py = vidY + vidH / 2 - (camY / camZ) * fV * (vidH / 2);
+      } else {
+        // Sun is behind the camera — clamp far off screen so edge arrow fires
+        px = camX >= 0 ? W * 10 : -W * 10;
+        py = camY >= 0 ? H * 10 : -H * 10;
+      }
+
+      // For the edge arrow direction when sun is off-screen, use the angular offset
+      const dAzRot = camX / (camZ > 0 ? camZ : 0.001) * (180 / Math.PI);
+      const dElRot = camY / (camZ > 0 ? camZ : 0.001) * (180 / Math.PI);
 
       if (sky && frameCount.current % ANALYSIS_INTERVAL === 0) {
         const inVideo = px >= vidX && px <= vidX + vidW && py >= vidY && py <= vidY + vidH;
