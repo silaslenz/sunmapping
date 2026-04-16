@@ -22,12 +22,6 @@ export interface SkyAnalysis {
   height: number;
   /** Fraction of the frame that is sky (0–1). */
   skyFraction: number;
-  /** Whether a bright sun-like region was detected. */
-  sunDetected: boolean;
-  /** Center of the detected sun blob in normalised coords (0–1). Null if not detected. */
-  sunCenter: { nx: number; ny: number } | null;
-  /** Radius of the detected sun blob in normalised coords. */
-  sunRadius: number;
   /** Whether the computed sun position is in the sky region. Set externally by the overlay. */
   sunInSky: boolean | null;
 }
@@ -342,53 +336,7 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   for (let i = 0; i < skyMask.length; i++) {
     if (skyMask[i]) skyPixelCount++;
   }
-
-  // --- Sun detection ---
-  let maxLum = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    const l = lumRGB(d[i], d[i + 1], d[i + 2]);
-    if (l > maxLum) maxLum = l;
-  }
-
-  const sunThresh = Math.max(
-    maxLum * 0.85,
-    avgLum + (maxLum - avgLum) * 0.7,
-    avgLum + 30,
-  );
-
-  let brightCount = 0;
-  let bxSum = 0;
-  let bySum = 0;
-
-  for (let y = 0; y < AH; y++) {
-    for (let x = 0; x < AW; x++) {
-      const i = (y * AW + x) * 4;
-      const l = lumRGB(d[i], d[i + 1], d[i + 2]);
-      if (l >= sunThresh) {
-        brightCount++;
-        bxSum += x;
-        bySum += y;
-      }
-    }
-  }
-
   const totalPixels = AW * AH;
-  const brightFrac = brightCount / totalPixels;
-  let sunDetected = false;
-  let sunCenter: { nx: number; ny: number } | null = null;
-  let sunRadius = 0;
-
-  if (brightCount >= 2 && brightFrac < 0.25 && (maxLum - avgLum) > 20) {
-    const cx = bxSum / brightCount;
-    const cy = bySum / brightCount;
-    // Check sky mask instead of just skyline
-    const mi = Math.round(cy) * AW + Math.round(cx);
-    if (mi >= 0 && mi < skyMask.length && skyMask[mi]) {
-      sunDetected = true;
-      sunCenter = { nx: cx / AW, ny: cy / AH };
-      sunRadius = Math.sqrt(brightCount / Math.PI) / Math.max(AW, AH);
-    }
-  }
 
   return {
     skyline,
@@ -396,9 +344,6 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
     width: AW,
     height: AH,
     skyFraction: skyPixelCount / totalPixels,
-    sunDetected,
-    sunCenter,
-    sunRadius,
     sunInSky: null,
   };
 }

@@ -86,11 +86,6 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
         drawSkyline(ctx, sky, vidW, vidH, vidX, vidY);
       }
 
-      // --- Draw detected sun blob ---
-      if (sky?.sunDetected && sky.sunCenter) {
-        drawDetectedSun(ctx, vidX + sky.sunCenter.nx * vidW, vidY + sky.sunCenter.ny * vidH);
-      }
-
       // --- Computed sun position overlay ---
       const hasData =
         sun != null &&
@@ -230,29 +225,6 @@ function drawSkyline(
   ctx.strokeStyle = 'rgba(100, 180, 255, 0.5)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
-}
-
-/** Draw a marker where the sun was detected in the image. */
-function drawDetectedSun(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  const r = 30;
-
-  // Dashed ring around detected position
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, TWO_PI);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 4]);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Label
-  ctx.font = 'bold 10px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillText('DETECTED', x + 1, y + r + 5);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
-  ctx.fillText('DETECTED', x, y + r + 4);
 }
 
 /** Draw the computed sun position as a glowing dot. */
