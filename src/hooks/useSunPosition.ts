@@ -28,17 +28,10 @@ export function useSunPosition(
     }
 
     function compute() {
-      if (lat == null || lon == null) return;
+      const date = new Date();
+      if (debugHour != null) date.setHours(debugHour, 0, 0, 0);
 
-      let date: Date;
-      if (debugHour != null) {
-        date = new Date();
-        date.setHours(debugHour, 0, 0, 0);
-      } else {
-        date = new Date();
-      }
-
-      const pos = SunCalc.getPosition(date, lat, lon);
+      const pos = SunCalc.getPosition(date, lat!, lon!);
 
       // SunCalc azimuth: radians from south, increasing westward.
       // Convert to compass degrees (0 = north, CW):

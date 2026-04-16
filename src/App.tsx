@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useDeviceOrientation } from './hooks/useDeviceOrientation';
 import { useSunPosition } from './hooks/useSunPosition';
 import { useCameraStream } from './hooks/useCameraStream';
-import { PermissionGate } from './components/PermissionGate';
 import { SunOverlay } from './components/SunOverlay';
 import { StatusPanel } from './components/StatusPanel';
 import { FovSlider } from './components/FovSlider';
@@ -16,17 +15,13 @@ const FOV_STORAGE_KEY = 'sunmapping_fov';
 
 function loadFov(): number {
   try {
-    const v = localStorage.getItem(FOV_STORAGE_KEY);
-    if (v) {
-      const n = parseInt(v, 10);
-      if (n >= 40 && n <= 90) return n;
-    }
+    const n = parseInt(localStorage.getItem(FOV_STORAGE_KEY) ?? '', 10);
+    if (n >= 40 && n <= 90) return n;
   } catch {}
   return DEFAULT_FOV;
 }
 
 export default function App() {
-  const [started, setStarted] = useState(false);
   const [fov, setFov] = useState<number>(loadFov);
   const [showSettings, setShowSettings] = useState(false);
   const [debugHour, setDebugHour] = useState<number | null>(null);
@@ -35,33 +30,18 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
-  // Lock to portrait on mount
   useEffect(() => {
-    screen.orientation?.lock?.('portrait-primary').catch(() => {
-      // lock() rejected — not supported outside fullscreen/PWA, or not available.
-    });
+    screen.orientation?.lock?.('portrait-primary').catch(() => {});
   }, []);
 
   const geo = useGeolocation();
   const orientation = useDeviceOrientation();
   const sun = useSunPosition(geo.lat, geo.lon, debugHour);
-  const camera = useCameraStream(started);
+  const camera = useCameraStream();
 
   function handleFovChange(v: number) {
     setFov(v);
     try { localStorage.setItem(FOV_STORAGE_KEY, String(v)); } catch {}
-  }
-
-  const handleSkyAnalysis = useCallback((a: SkyAnalysis | null) => {
-    setSkyAnalysis(a);
-  }, []);
-
-  const errors: string[] = [];
-  if (camera.error) errors.push(camera.error);
-  if (geo.error) errors.push(geo.error);
-
-  if (!started) {
-    return <PermissionGate onStart={() => setStarted(true)} errors={errors} />;
   }
 
   return (
@@ -73,7 +53,7 @@ export default function App() {
         fovH={fov}
         videoRef={videoRef}
         overlayRef={overlayRef}
-        onSkyAnalysis={handleSkyAnalysis}
+        onSkyAnalysis={setSkyAnalysis}
       />
 
       {/* Landscape warning — shown via CSS @media only */}

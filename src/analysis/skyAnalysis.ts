@@ -26,13 +26,25 @@ export interface SkyAnalysis {
   sunInSky: boolean | null;
 }
 
+// Analysis resolution (downsampled for performance)
 const AW = 80;
 const AH = 60;
+
+// Tuning constants
+const GRADIENT_WINDOW = 3;       // smoothing half-window for gradient scan
+const GRADIENT_SUSTAIN = 3;      // consecutive high-gradient rows to confirm boundary
+const SKY_PROFILE_MIN_PX = 20;   // min sky pixels needed to build colour profile
+const COLOUR_TOLERANCE = 1.8;    // std deviations for sky colour matching
+const TEXTURE_SCALE = 1.8;       // texture limit = avgSkyTexture * TEXTURE_SCALE
+const TEXTURE_MIN = 12;          // absolute texture floor
+const COLOUR_STD_FLOOR = 12;     // min std dev so uniform skies don't reject everything
+
+const TOTAL_PIXELS = AW * AH;
 
 let analysisCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
 let analysisCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
 
-function getAnalysisCanvas() {
+function getAnalysisCtx() {
   if (!analysisCanvas) {
     if (typeof OffscreenCanvas !== 'undefined') {
       analysisCanvas = new OffscreenCanvas(AW, AH);
@@ -43,7 +55,7 @@ function getAnalysisCanvas() {
     }
     analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | null;
   }
-  return { canvas: analysisCanvas, ctx: analysisCtx! };
+  return analysisCtx!;
 }
 
 function lumRGB(r: number, g: number, b: number): number {
@@ -61,7 +73,6 @@ function findSkyBoundary(
   h: number,
   avgLum: number,
 ): number {
-  const WINDOW = 3;
   const gradients = new Float32Array(h);
 
   for (let y = 0; y < h - 1; y++) {
@@ -84,7 +95,7 @@ function findSkyBoundary(
   for (let y = 0; y < h; y++) {
     let sum = 0;
     let n = 0;
-    for (let dy = -WINDOW; dy <= WINDOW; dy++) {
+    for (let dy = -GRADIENT_WINDOW; dy <= GRADIENT_WINDOW; dy++) {
       const yy = y + dy;
       if (yy >= 0 && yy < h) { sum += gradients[yy]; n++; }
     }
@@ -114,15 +125,14 @@ function findSkyBoundary(
 
   let boundary = 0;
   let consecutiveHigh = 0;
-  const SUSTAIN = 3;
 
   for (let y = 0; y < h; y++) {
     const isTextured =
       smooth[y] > gradThreshold || colourVar[y] > colourThreshold;
     if (isTextured) {
       consecutiveHigh++;
-      if (consecutiveHigh >= SUSTAIN) {
-        boundary = y - SUSTAIN + 1;
+      if (consecutiveHigh >= GRADIENT_SUSTAIN) {
+        boundary = y - GRADIENT_SUSTAIN + 1;
         break;
       }
     } else {
@@ -131,14 +141,14 @@ function findSkyBoundary(
     }
   }
 
-  if (consecutiveHigh < SUSTAIN && boundary >= h - 1) {
+  if (consecutiveHigh < GRADIENT_SUSTAIN && boundary >= h - 1) {
     boundary = h;
   }
 
-  // The smoothing window smears gradient signal WINDOW rows upward,
+  // The smoothing window smears gradient signal GRADIENT_WINDOW rows upward,
   // so the detected boundary leads the true visual edge. Compensate.
   if (boundary > 0 && boundary < h) {
-    boundary = Math.min(boundary + WINDOW, h);
+    boundary = Math.min(boundary + GRADIENT_WINDOW, h);
   }
 
   return boundary;
@@ -175,14 +185,13 @@ function computeSkyProfile(
     }
   }
 
-  if (count < 20) return null; // not enough sky pixels to profile
+  if (count < SKY_PROFILE_MIN_PX) return null;
 
-  const n = count;
-  const meanR = sumR / n, meanG = sumG / n, meanB = sumB / n, meanL = sumL / n;
-  const stdR = Math.sqrt(Math.max(0, sumR2 / n - meanR * meanR));
-  const stdG = Math.sqrt(Math.max(0, sumG2 / n - meanG * meanG));
-  const stdB = Math.sqrt(Math.max(0, sumB2 / n - meanB * meanB));
-  const stdL = Math.sqrt(Math.max(0, sumL2 / n - meanL * meanL));
+  const meanR = sumR / count, meanG = sumG / count, meanB = sumB / count, meanL = sumL / count;
+  const stdR = Math.sqrt(Math.max(0, sumR2 / count - meanR * meanR));
+  const stdG = Math.sqrt(Math.max(0, sumG2 / count - meanG * meanG));
+  const stdB = Math.sqrt(Math.max(0, sumB2 / count - meanB * meanB));
+  const stdL = Math.sqrt(Math.max(0, sumL2 / count - meanL * meanL));
 
   return { meanR, meanG, meanB, meanL, stdR, stdG, stdB, stdL };
 }
@@ -193,11 +202,11 @@ function matchesSkyProfile(
   profile: SkyProfile,
   tolerance: number, // number of std deviations
 ): boolean {
-  // Add a minimum std of 12 so very uniform skies don't reject everything
-  const tR = Math.max(12, profile.stdR) * tolerance;
-  const tG = Math.max(12, profile.stdG) * tolerance;
-  const tB = Math.max(12, profile.stdB) * tolerance;
-  const tL = Math.max(12, profile.stdL) * tolerance;
+  // Add a minimum std of COLOUR_STD_FLOOR so very uniform skies don't reject everything
+  const tR = Math.max(COLOUR_STD_FLOOR, profile.stdR) * tolerance;
+  const tG = Math.max(COLOUR_STD_FLOOR, profile.stdG) * tolerance;
+  const tB = Math.max(COLOUR_STD_FLOOR, profile.stdB) * tolerance;
+  const tL = Math.max(COLOUR_STD_FLOOR, profile.stdL) * tolerance;
   const l = lumRGB(r, g, b);
 
   return Math.abs(r - profile.meanR) < tR
@@ -257,7 +266,7 @@ export function isPointInSky(
 export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   if (!video.videoWidth || !video.videoHeight) return null;
 
-  const { ctx } = getAnalysisCanvas();
+  const ctx = getAnalysisCtx();
   if (!ctx) return null;
 
   ctx.drawImage(video, 0, 0, AW, AH);
@@ -315,15 +324,15 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
     }
     const avgSkyTexture = skyTexCount > 0 ? skyTexSum / skyTexCount : 0;
     // Below-skyline pixels must have low texture to qualify as sky
-    const textureLimit = Math.max(avgSkyTexture * 1.8, 12);
+    const textureLimit = Math.max(avgSkyTexture * TEXTURE_SCALE, TEXTURE_MIN);
 
-    // Scan below skyline for pixels matching the sky profile (tight tolerance)
+    // Scan below skyline for pixels matching the sky profile
     for (let x = 0; x < AW; x++) {
       for (let y = skyline[x]; y < AH; y++) {
         const i = (y * AW + x) * 4;
         const r = d[i], g = d[i + 1], b = d[i + 2];
 
-        if (matchesSkyProfile(r, g, b, profile, 1.8)
+        if (matchesSkyProfile(r, g, b, profile, COLOUR_TOLERANCE)
             && localTexture(d, x, y, AW, AH) < textureLimit) {
           skyMask[y * AW + x] = 1;
         }
@@ -336,14 +345,13 @@ export function analyseSky(video: HTMLVideoElement): SkyAnalysis | null {
   for (let i = 0; i < skyMask.length; i++) {
     if (skyMask[i]) skyPixelCount++;
   }
-  const totalPixels = AW * AH;
 
   return {
     skyline,
     skyMask,
     width: AW,
     height: AH,
-    skyFraction: skyPixelCount / totalPixels,
+    skyFraction: skyPixelCount / TOTAL_PIXELS,
     sunInSky: null,
   };
 }

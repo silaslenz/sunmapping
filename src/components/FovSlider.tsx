@@ -1,5 +1,3 @@
-
-
 interface Props {
   fov: number;
   onChange: (fov: number) => void;

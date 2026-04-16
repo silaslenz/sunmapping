@@ -8,27 +8,18 @@ interface Props {
   stream: MediaStream | null;
   orientation: OrientationState;
   sun: SunPosition | null;
-  fovH: number; // horizontal field of view in degrees
+  fovH: number; // landscape (sensor) horizontal FoV in degrees
   videoRef: React.RefObject<HTMLVideoElement | null>;
   overlayRef: React.RefObject<HTMLCanvasElement | null>;
   onSkyAnalysis?: (analysis: SkyAnalysis | null) => void;
 }
 
-const TWO_PI = Math.PI * 2;
-
-/** Normalize an angle difference to [-180, 180]. */
-function angleDiff(a: number, b: number): number {
-  const d = ((a - b) + 540) % 360 - 180;
-  return d;
-}
-
-/** How many frames to skip between sky analyses. */
 const ANALYSIS_INTERVAL = 6;
 
 export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRef, onSkyAnalysis }: Props) {
   const rafRef = useRef<number>(0);
   const frameCount = useRef(0);
-  const lastAnalysis = useRef<SkyAnalysis | null>(null);
+  const skyRef = useRef<SkyAnalysis | null>(null);
 
   // Attach stream to video element
   useEffect(() => {
@@ -36,7 +27,7 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
     if (!video) return;
     if (stream) {
       video.srcObject = stream;
-      video.play().catch(() => {/* autoplay may be blocked */});
+      video.play().catch(() => {});
     } else {
       video.srcObject = null;
     }
@@ -44,49 +35,47 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 
   // Draw loop
   useEffect(() => {
-    const canvas = overlayRef.current;
-    if (!canvas) return;
-
     function draw() {
       rafRef.current = requestAnimationFrame(draw);
 
-      const ctx = canvas!.getContext('2d');
-      if (!ctx) return;
+      const canvas = overlayRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx) return;
 
-      const W = canvas!.offsetWidth;
-      const H = canvas!.offsetHeight;
-      if (canvas!.width !== W || canvas!.height !== H) {
-        canvas!.width = W;
-        canvas!.height = H;
+      const W = canvas.offsetWidth;
+      const H = canvas.offsetHeight;
+      if (canvas.width !== W || canvas.height !== H) {
+        canvas.width = W;
+        canvas.height = H;
       }
 
       ctx.clearRect(0, 0, W, H);
 
-      // --- Compute the video rect within the screen (object-fit: contain) ---
-      // With contain the full video is visible, letterboxed with black bars.
+      // Compute the video rect within the screen (object-fit: contain letterboxing)
       const video = videoRef.current;
       const videoW = video?.videoWidth || 640;
       const videoH = video?.videoHeight || 480;
       const containScale = Math.min(W / videoW, H / videoH);
-      const vidW = videoW * containScale;  // displayed video width
-      const vidH = videoH * containScale;  // displayed video height
-      const vidX = (W - vidW) / 2;         // left offset of video rect
-      const vidY = (H - vidH) / 2;         // top offset of video rect
+      const vidW = videoW * containScale;
+      const vidH = videoH * containScale;
+      const vidX = (W - vidW) / 2;
+      const vidY = (H - vidH) / 2;
 
-      // --- Sky analysis (throttled) ---
+      // Sky analysis (throttled)
       frameCount.current++;
       if (video && frameCount.current % ANALYSIS_INTERVAL === 0) {
-        lastAnalysis.current = analyseSky(video);
+        skyRef.current = analyseSky(video);
       }
 
-      const sky = lastAnalysis.current;
+      const sky = skyRef.current;
+      if (sky) drawSkyline(ctx, sky, vidW, vidH, vidX, vidY);
 
-      // --- Draw skyline (mapped to video rect, not full canvas) ---
-      if (sky) {
-        drawSkyline(ctx, sky, vidW, vidH, vidX, vidY);
-      }
+      // fovH is the landscape (sensor) horizontal FoV. In portrait the sensor
+      // rotates 90°, so fovH becomes the portrait vertical FoV.
+      const portraitFovV = fovH;
+      const halfVRad = (portraitFovV / 2) * Math.PI / 180;
+      const portraitFovH = 2 * Math.atan(Math.tan(halfVRad) * (videoW / videoH)) * 180 / Math.PI;
 
-      // --- Computed sun position overlay ---
       const hasData =
         sun != null &&
         orientation.absolute &&
@@ -104,43 +93,27 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
       const heading = orientation.heading!;
       const tilt = orientation.tilt!;
       const roll = orientation.roll ?? 0;
-      const sunAz = sun!.azimuth;
-      const sunEl = sun!.altitude;
 
-      // With object-fit: contain, the full video is visible.
-      // fovH is the *landscape* (sensor) horizontal FoV from the phone spec.
-      // In portrait the sensor is rotated 90°, so:
-      //   portrait vertical FoV = fovH (the sensor's wide dimension)
-      //   portrait horizontal FoV = derived from aspect ratio
-      // Video dimensions are already in portrait orientation (videoW < videoH for 3:4).
-      const portraitFovV = fovH;
-      const halfVRad = (portraitFovV / 2) * Math.PI / 180;
-      const portraitFovH = 2 * Math.atan(Math.tan(halfVRad) * (videoW / videoH)) * 180 / Math.PI;
+      // Inline angleDiff: normalize (a - b) to [-180, 180]
+      const dAz = ((sun!.azimuth - heading) + 540) % 360 - 180;
+      const dEl = sun!.altitude - tilt;
 
-      const dAz = angleDiff(sunAz, heading);
-      const dEl = sunEl - tilt;
-
-      const rollRad = (roll * Math.PI) / 180;
+      const rollRad = roll * Math.PI / 180;
       const dAzRot = dAz * Math.cos(rollRad) + dEl * Math.sin(rollRad);
       const dElRot = -dAz * Math.sin(rollRad) + dEl * Math.cos(rollRad);
 
-      // Project onto the video rect (not the full canvas)
       const px = vidX + vidW / 2 + (dAzRot / (portraitFovH / 2)) * (vidW / 2);
       const py = vidY + vidH / 2 - (dElRot / (portraitFovV / 2)) * (vidH / 2);
 
-      // --- Determine if the computed sun is in the sky region ---
       if (sky && frameCount.current % ANALYSIS_INTERVAL === 0) {
         const inVideo = px >= vidX && px <= vidX + vidW && py >= vidY && py <= vidY + vidH;
-        // isPointInSky expects coords relative to the video rect
         sky.sunInSky = inVideo
           ? isPointInSky(px - vidX, py - vidY, vidW, vidH, sky)
           : null;
         onSkyAnalysis?.(sky);
       }
 
-      const inFrame =
-        px >= -40 && px <= W + 40 && py >= -40 && py <= H + 40;
-
+      const inFrame = px >= -40 && px <= W + 40 && py >= -40 && py <= H + 40;
       if (inFrame) {
         drawSunDot(ctx, px, py);
       } else {
@@ -150,7 +123,7 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 
     rafRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [orientation, sun, fovH, overlayRef, videoRef, onSkyAnalysis]);
+  }, [orientation, sun, fovH, onSkyAnalysis]);
 
   return (
     <div className="sun-overlay">
@@ -173,7 +146,6 @@ export function SunOverlay({ stream, orientation, sun, fovH, videoRef, overlayRe
 // Drawing helpers
 // ===================================================================
 
-/** Draw the skyline boundary and the full sky mask. */
 function drawSkyline(
   ctx: CanvasRenderingContext2D,
   sky: SkyAnalysis,
@@ -188,7 +160,7 @@ function drawSkyline(
   const xScale = vidW / width;
   const yScale = vidH / height;
 
-  // --- Tint above-skyline sky (subtle blue) ---
+  // Tint above-skyline sky (subtle blue)
   ctx.beginPath();
   ctx.moveTo(offsetX, offsetY + skyline[0] * yScale);
   for (let x = 1; x < width; x++) {
@@ -200,23 +172,20 @@ function drawSkyline(
   ctx.fillStyle = 'rgba(100, 180, 255, 0.08)';
   ctx.fill();
 
-  // --- Tint continuing-sky pixels below the skyline (green-ish) ---
-  // Draw each sky-mask pixel below the skyline as a small rect
+  // Tint continuing-sky pixels below skyline (green), batched per column
   ctx.fillStyle = 'rgba(100, 255, 180, 0.3)';
-  for (let ay = 0; ay < height; ay++) {
-    for (let ax = 0; ax < width; ax++) {
-      if (skyMask[ay * width + ax] === 1 && ay >= skyline[ax]) {
-        ctx.fillRect(
-          offsetX + ax * xScale,
-          offsetY + ay * yScale,
-          Math.ceil(xScale),
-          Math.ceil(yScale),
-        );
+  const colW = Math.ceil(xScale);
+  const colH = Math.ceil(yScale);
+  for (let ax = 0; ax < width; ax++) {
+    const startY = skyline[ax];
+    for (let ay = startY; ay < height; ay++) {
+      if (skyMask[ay * width + ax] === 1) {
+        ctx.fillRect(offsetX + ax * xScale, offsetY + ay * yScale, colW, colH);
       }
     }
   }
 
-  // --- Stroke the skyline ---
+  // Stroke the skyline
   ctx.beginPath();
   ctx.moveTo(offsetX, offsetY + skyline[0] * yScale);
   for (let x = 1; x < width; x++) {
@@ -227,47 +196,41 @@ function drawSkyline(
   ctx.stroke();
 }
 
-/** Draw the computed sun position as a glowing dot. */
 function drawSunDot(ctx: CanvasRenderingContext2D, x: number, y: number) {
   const r = 22;
 
-  // Outer glow
   const glow = ctx.createRadialGradient(x, y, r * 0.4, x, y, r * 2.5);
   glow.addColorStop(0, 'rgba(255, 220, 50, 0.55)');
   glow.addColorStop(1, 'rgba(255, 180, 0, 0)');
   ctx.beginPath();
-  ctx.arc(x, y, r * 2.5, 0, TWO_PI);
+  ctx.arc(x, y, r * 2.5, 0, Math.PI * 2);
   ctx.fillStyle = glow;
   ctx.fill();
 
-  // Core circle
   const core = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
   core.addColorStop(0, '#fff9c4');
   core.addColorStop(0.5, '#ffe600');
   core.addColorStop(1, '#ff9800');
   ctx.beginPath();
-  ctx.arc(x, y, r, 0, TWO_PI);
+  ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fillStyle = core;
   ctx.fill();
 
-  // Thin border
   ctx.beginPath();
-  ctx.arc(x, y, r, 0, TWO_PI);
+  ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(255,255,255,0.7)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  // Crosshair lines
+  const armLen = r + 12;
   ctx.strokeStyle = 'rgba(255,255,255,0.6)';
   ctx.lineWidth = 1;
-  const armLen = r + 12;
   ctx.beginPath();
   ctx.moveTo(x - armLen, y); ctx.lineTo(x + armLen, y);
   ctx.moveTo(x, y - armLen); ctx.lineTo(x, y + armLen);
   ctx.stroke();
 }
 
-/** Draw an edge arrow pointing toward the sun when it's offscreen. */
 function drawEdgeArrow(
   ctx: CanvasRenderingContext2D,
   W: number,
@@ -290,10 +253,8 @@ function drawEdgeArrow(
   const tx1 = cos !== 0 ? (xEdge - cx) / cos : Infinity;
   const ty1 = sin !== 0 ? (yEdge - cy) / sin : Infinity;
   const t = Math.min(Math.abs(tx1), Math.abs(ty1));
-  let tx = cx + cos * t;
-  let ty = cy + sin * t;
-  tx = Math.max(margin, Math.min(W - margin, tx));
-  ty = Math.max(margin, Math.min(H - margin, ty));
+  const tx = Math.max(margin, Math.min(W - margin, cx + cos * t));
+  const ty = Math.max(margin, Math.min(H - margin, cy + sin * t));
 
   const arrowLen = 28;
   const arrowWidth = 10;
@@ -301,7 +262,6 @@ function drawEdgeArrow(
   ctx.save();
   ctx.translate(tx, ty);
   ctx.rotate(angleRad);
-
   ctx.beginPath();
   ctx.moveTo(arrowLen / 2, 0);
   ctx.lineTo(-arrowLen / 2, arrowWidth / 2);
@@ -312,7 +272,6 @@ function drawEdgeArrow(
   ctx.strokeStyle = 'rgba(255,255,255,0.8)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
-
   ctx.restore();
 
   const labelOffset = 18;

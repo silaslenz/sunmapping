@@ -5,13 +5,11 @@ export interface CameraState {
   error: string | null;
 }
 
-export function useCameraStream(active: boolean): CameraState {
+export function useCameraStream(): CameraState {
   const [state, setState] = useState<CameraState>({ stream: null, error: null });
   const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    if (!active) return;
-
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setState({ stream: null, error: 'Camera API not available. Make sure you are on HTTPS.' });
       return;
@@ -49,7 +47,7 @@ export function useCameraStream(active: boolean): CameraState {
         streamRef.current = null;
       }
     };
-  }, [active]);
+  }, []);
 
   return state;
 }
